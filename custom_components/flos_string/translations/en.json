@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Flos String Light",
+        "description": "Enter the Bluetooth MAC address of your Flos String Light.",
+        "data": {
+          "address": "Bluetooth MAC Address",
+          "name": "Name"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Flos String Light Discovered",
+        "description": "A Flos String Light was discovered: {name}",
+        "data": {
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Invalid MAC address format. Use XX:XX:XX:XX:XX:XX."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}
