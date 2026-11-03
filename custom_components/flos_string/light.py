@@ -54,6 +54,12 @@ def flos_to_ha(flos_brightness: int) -> int:
     return round(flos_brightness * 255 / 100)
 
 
+def _describe(value: bytes) -> str:
+    """Hex plus printable ASCII, for the GATT table in the debug log."""
+    text = "".join(chr(b) if 32 <= b < 127 else "." for b in value)
+    return f"{value.hex()} '{text}'"
+
+
 class FlosStringBLEManager:
     """Manage BLE connection to a Flos String Light.
 
@@ -72,6 +78,7 @@ class FlosStringBLEManager:
         self._lock = asyncio.Lock()
         self._disconnect_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+        self._gatt_logged = False
 
     async def write_brightness(self, value: int) -> bool:
         """Write brightness value (0-100) to the device.
@@ -211,7 +218,9 @@ class FlosStringBLEManager:
         
         # Give the device time to stabilize after connection
         await asyncio.sleep(0.5)
-        
+
+        await self._log_gatt_table()
+
         # Ensure services are discovered
         if self._client.services:
             char = self._client.services.get_characteristic(BRIGHTNESS_CHAR_UUID)
@@ -248,6 +257,48 @@ class FlosStringBLEManager:
                 _LOGGER.debug("Device ready for writes")
             else:
                 _LOGGER.warning("Brightness characteristic %s not found in services", BRIGHTNESS_CHAR_UUID)
+
+    async def _log_gatt_table(self) -> None:
+        """Log every service, characteristic and descriptor with its value.
+
+        Diagnostics only: reads, never writes. Runs once per manager (once per
+        Home Assistant start or entry reload), and only with debug logging on.
+        """
+        if self._gatt_logged or not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        if self._client is None or not self._client.services:
+            return
+        self._gatt_logged = True
+        client = self._client
+        for service in client.services:
+            _LOGGER.debug("GATT %s: service %s (handle %d)", self._address, service.uuid, service.handle)
+            for char in service.characteristics:
+                value = "-"
+                if "read" in char.properties:
+                    try:
+                        value = _describe(bytes(await client.read_gatt_char(char)))
+                    except (BleakError, TimeoutError, ValueError) as err:
+                        value = f"read failed: {err}"
+                _LOGGER.debug(
+                    "GATT %s:   characteristic %s (handle %d) %s: %s",
+                    self._address,
+                    char.uuid,
+                    char.handle,
+                    char.properties,
+                    value,
+                )
+                for descriptor in char.descriptors:
+                    try:
+                        value = _describe(bytes(await client.read_gatt_descriptor(descriptor.handle)))
+                    except (BleakError, TimeoutError, ValueError) as err:
+                        value = f"read failed: {err}"
+                    _LOGGER.debug(
+                        "GATT %s:     descriptor %s (handle %d): %s",
+                        self._address,
+                        descriptor.uuid,
+                        descriptor.handle,
+                        value,
+                    )
 
     def _on_notification(self, _char: Any, data: bytearray) -> None:
         """Log notifications/indications from the brightness characteristic."""
