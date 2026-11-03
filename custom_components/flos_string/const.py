@@ -16,7 +16,7 @@ BRIGHTNESS_MAX = 100  # 0x64
 DEFAULT_BRIGHTNESS_PCT = 100
 
 # BLE connection parameters
-DISCONNECT_DELAY = 5.0   # seconds before disconnecting after last command
+DISCONNECT_DELAY = 30.0  # seconds before disconnecting after last command
 WRITE_TIMEOUT = 10.0     # seconds for BLE write timeout
 CONNECT_TIMEOUT = 15.0   # seconds for BLE connection timeout
 MAX_RETRIES = 3          # max retry attempts per operation
