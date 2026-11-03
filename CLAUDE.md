@@ -3,7 +3,7 @@
 Peters eigen Home Assistant-integratie `flos_string` voor de Flos String Light via Bluetooth LE. De code komt uit zijn HA (`/config/custom_components/flos_string`, 3/11/2026). Vanaf nu is deze repo de bron.
 
 ## Lees eerst
-- `docs/CLAUDE_CODE_PROMPT.md` is de startopdracht: omgeving (HAOS, lampen, Bluetooth-paden), bekende problemen en de stappen.
+- `docs/CLAUDE_CODE_PROMPT.md` is de startopdracht: omgeving (HAOS, lampen, Bluetooth-paden), bekende problemen en de stappen. Het bestand staat alleen lokaal (in `.gitignore`), net als `docs/LOCAL.md`.
 - `README.md` beschrijft wat de integratie doet, de installatie, de beperkingen en de bekende problemen.
 - `custom_components/flos_string/const.py` bevat de service- en kenmerk-UUID's en de timing.
 - `custom_components/flos_string/light.py` bevat de BLE-manager (verbinden, lezen, schrijven) en de light-entiteit.

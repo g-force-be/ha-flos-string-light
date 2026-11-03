@@ -6,3 +6,4 @@ venv/
 .mypy_cache/
 .ruff_cache/
 docs/LOCAL.md
+docs/CLAUDE_CODE_PROMPT.md
