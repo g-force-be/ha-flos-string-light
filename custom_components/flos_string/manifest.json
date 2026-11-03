@@ -1,16 +1,23 @@
 {
   "domain": "flos_string",
   "name": "Flos String Light",
-  "codeowners": [],
-  "config_flow": true,
-  "dependencies": ["bluetooth"],
-  "documentation": "https://github.com/your-repo/flos-string-ha",
-  "iot_class": "local_polling",
-  "requirements": ["bleak>=0.21.0"],
-  "version": "1.0.0",
   "bluetooth": [
     {
       "service_uuid": "0dcecf0c-ad06-11e3-81e4-425861b86ab6"
     }
-  ]
+  ],
+  "codeowners": [
+    "@g-force-be"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "bluetooth"
+  ],
+  "documentation": "https://github.com/g-force-be/ha-flos-string-light",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/g-force-be/ha-flos-string-light/issues",
+  "requirements": [
+    "bleak>=0.21.0"
+  ],
+  "version": "1.0.0"
 }

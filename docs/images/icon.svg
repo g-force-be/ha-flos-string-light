@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Flos String Light for Home Assistant</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c3036"/>
+      <stop offset="1" stop-color="#1a1c20"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0a83c"/>
+      <stop offset=".55" stop-color="#ffc861"/>
+      <stop offset="1" stop-color="#ffe7a8"/>
+    </linearGradient>
+    <radialGradient id="halo" cx=".5" cy=".62" r=".5">
+      <stop offset="0" stop-color="#ffd27a" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#ffd27a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="cap" cx=".36" cy=".3" r=".75">
+      <stop offset="0" stop-color="#4a5058"/>
+      <stop offset=".6" stop-color="#1e2126"/>
+      <stop offset="1" stop-color="#0e1013"/>
+    </radialGradient>
+    <radialGradient id="opal" cx=".5" cy=".18" r=".9">
+      <stop offset="0" stop-color="#fffdf6"/>
+      <stop offset=".55" stop-color="#fff1cf"/>
+      <stop offset="1" stop-color="#f6cf86"/>
+    </radialGradient>
+    <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- tile -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x=".5" y=".5" width="511" height="511" rx="111.5" fill="none" stroke="#ffffff" stroke-opacity=".08"/>
+
+  <!-- brightness track and arc (about three quarters), open at the top for the cable -->
+  <path d="M330.4 116.5 A176 176 0 1 1 181.6 116.5" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="22" stroke-linecap="round"/>
+  <path d="M330.4 116.5 A176 176 0 1 1 84.2 314.1" fill="none" stroke="url(#arc)" stroke-width="22" stroke-linecap="round" filter="url(#glow)"/>
+
+  <!-- warm light around the head -->
+  <circle cx="256" cy="276" r="168" fill="url(#halo)"/>
+
+  <!-- cable -->
+  <line x1="256" y1="0" x2="256" y2="166" stroke="#9aa1a9" stroke-width="6" clip-path="url(#tile)"/>
+
+  <!-- sphere head: lit opal lower half, matt black upper half -->
+  <path d="M144 276 A112 112 0 0 0 368 276 Z" fill="url(#opal)" filter="url(#glow)"/>
+  <path d="M144 276 A112 112 0 0 1 368 276 Z" fill="url(#cap)"/>
+  <path d="M144 276 A112 112 0 0 1 368 276" fill="none" stroke="#ffffff" stroke-opacity=".10" stroke-width="2"/>
+  <!-- highlight on the cap -->
+  <path d="M184 232 A86 86 0 0 1 236 194" fill="none" stroke="#ffffff" stroke-opacity=".28" stroke-width="10" stroke-linecap="round"/>
+</svg>

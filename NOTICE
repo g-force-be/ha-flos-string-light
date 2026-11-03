@@ -1,0 +1,16 @@
+Flos String Light integration for Home Assistant
+Copyright (c) 2026 Peter Gheeraert
+Licensed under the MIT License (see LICENSE).
+
+Third-party code
+----------------
+Code taken from another project is listed here and in a header comment in
+the file concerned, together with its licence. At this time no such code is
+included.
+
+Trademarks
+----------
+Not affiliated with or endorsed by Flos. Flos is a trademark of Flos S.p.A.
+This project contains no Flos logo, wordmark or product photography; the
+icon (docs/images/icon.svg and the brand/ images made from it) is original
+artwork.

@@ -1,0 +1,30 @@
+# Two checks of this repository. They only report; nothing is sent to HACS or Home Assistant.
+# - hacs: HACS's own check (hacs.json, manifest.json, brand icon, description, topics, issues, licence, README).
+#   A passing run is required before the repository can be proposed for the HACS default list.
+# - hassfest: Home Assistant's check of the integration (manifest keys and order, translations, services, config flow).
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: home-assistant/actions/hassfest@master

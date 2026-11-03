@@ -1,0 +1,72 @@
+# A release, by hand: Actions → Release → Run workflow (or: gh workflow run release.yml), from main.
+# Version = ISO year . ISO week . number within that week, e.g. 2026.45.1, 2026.45.2, 2026.46.1.
+# Checks that the Python compiles, writes the version into manifest.json, commits that on main as "Release <version>",
+# tags that commit and publishes a GitHub release. HACS installs the integration from the tag and offers each release
+# as an update; Home Assistant shows the version from manifest.json.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Release notes (empty: the commits since the previous release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - run: python -m compileall -q custom_components
+
+      - name: Version
+        id: version
+        run: |
+          week="$(date -u +%G).$((10#$(date -u +%V)))"
+          n=$(git tag -l "$week.*" | wc -l)
+          echo "version=$week.$((n + 1))" >> "$GITHUB_OUTPUT"
+
+      - name: Write version into manifest.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          path = pathlib.Path("custom_components/flos_string/manifest.json")
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          manifest["version"] = os.environ["VERSION"]
+          path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+          git diff --stat
+
+      - name: Commit and tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release $VERSION"
+          git push origin HEAD:main
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          if [ -n "$NOTES" ]; then notes=(--notes "$NOTES"); else notes=(--generate-notes); fi
+          gh release create "$VERSION" --target "$(git rev-parse HEAD)" --title "$VERSION" "${notes[@]}"
