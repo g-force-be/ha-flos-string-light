@@ -12,7 +12,7 @@ Peters eigen Home Assistant-integratie `flos_string` voor de Flos String Light v
 - **Peters HA:**
   - Wijzig niets (bestanden, integraties, herstart) zonder zijn akkoord.
   - Verwijder de bestaande integratie en config entries niet. Houd het domein `flos_string` en de unique_id (MAC-adres zonder dubbele punten) ongewijzigd. Anders krijgen `light.flos_string_light_slaapkamer` en `light.badkamer` nieuwe entiteiten, en die gebruikt het dashboard `google-home-hub-keuken` (view Lights) en de helper "Lampen aan".
-  - HACS overschrijft de map gewoon. Maak voor elke deploy een HA-backup.
+  - HACS overschrijft de map gewoon.
   - Een reload van de config entry laadt geen nieuwe Python-code; daarvoor is een herstart nodig.
 - **Lokale gegevens:** IP-adressen, MAC-adressen en config-entry-ID's staan alleen in `docs/LOCAL.md` (in `.gitignore`). In de repo gebruik je placeholders.
 - **Geheimen:** geen tokens, wachtwoorden of encryptiesleutels in de repo.
