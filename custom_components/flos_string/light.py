@@ -119,7 +119,7 @@ class FlosStringBLEManager:
                         _LOGGER.debug("Post-write read failed: %s", e)
                     self._schedule_disconnect()
                     return True
-            except (BleakError, TimeoutError, OSError) as err:
+            except (BleakError, TimeoutError, OSError, ValueError) as err:
                 _LOGGER.warning(
                     "BLE write failed for %s (attempt %d/%d): %s",
                     self._address,
@@ -160,7 +160,7 @@ class FlosStringBLEManager:
                         self._address,
                     )
                     return value
-            except (BleakError, TimeoutError, OSError) as err:
+            except (BleakError, TimeoutError, OSError, ValueError) as err:
                 _LOGGER.warning(
                     "BLE read failed for %s (attempt %d/%d): %s",
                     self._address,
@@ -224,26 +224,34 @@ class FlosStringBLEManager:
                         desc_value = await self._client.read_gatt_descriptor(descriptor.handle)
                         _LOGGER.debug("Descriptor %s (handle %d): %s", 
                                       descriptor.uuid, descriptor.handle, desc_value.hex())
-                    except BleakError as e:
+                    except (BleakError, ValueError) as e:
                         _LOGGER.debug("Could not read descriptor %s: %s", descriptor.uuid, e)
                 
-                # Enable indications by writing to CCCD (0x2902)
-                # Value 0x0200 = enable indications, 0x0100 = enable notifications
-                for descriptor in char.descriptors:
-                    if "2902" in str(descriptor.uuid):
-                        try:
-                            # Enable indications
-                            await self._client.write_gatt_descriptor(descriptor.handle, bytes([0x02, 0x00]))
-                            _LOGGER.debug("Enabled indications on CCCD descriptor")
-                        except BleakError as e:
-                            _LOGGER.debug("Could not enable indications: %s", e)
-                        break
+                # Enable notifications/indications on the characteristic.
+                # Bleak (HA 2026.10+) refuses direct writes to the CCCD (0x2902)
+                # and raises ValueError; start_notify() writes the CCCD itself
+                # (indications when the characteristic only supports indicate).
+                if "notify" in char.properties or "indicate" in char.properties:
+                    try:
+                        await self._client.start_notify(char, self._on_notification)
+                        _LOGGER.debug(
+                            "Subscribed to %s on %s (properties: %s)",
+                            char.uuid,
+                            self._address,
+                            char.properties,
+                        )
+                    except (BleakError, ValueError) as e:
+                        _LOGGER.debug("Could not subscribe to %s: %s", char.uuid, e)
                 
                 # Wait for device to be fully ready after descriptor operations
                 await asyncio.sleep(1.0)
                 _LOGGER.debug("Device ready for writes")
             else:
                 _LOGGER.warning("Brightness characteristic %s not found in services", BRIGHTNESS_CHAR_UUID)
+
+    def _on_notification(self, _char: Any, data: bytearray) -> None:
+        """Log notifications/indications from the brightness characteristic."""
+        _LOGGER.debug("Notification from %s: %s", self._address, bytes(data).hex())
 
     def _on_disconnected(self, client: BleakClient) -> None:
         """Handle unexpected disconnection."""
