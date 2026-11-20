@@ -23,6 +23,7 @@ import time
 
 from bleak import BleakClient, BleakError
 from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak.backends.device import BLEDevice
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from homeassistant.components import bluetooth
@@ -81,6 +82,8 @@ class FlosStringBLEManager:
         self._stopped = False
         self._outage_logged = False
         self._gatt_logged = False
+        # False until this manager has connected once; see _connect().
+        self._services_known = False
 
     @property
     def available(self) -> bool:
@@ -197,20 +200,19 @@ class FlosStringBLEManager:
 
         _LOGGER.debug("Connecting to Flos String Light %s", self.address)
         self._disconnected.clear()
-        client = await establish_connection(
-            BleakClientWithServiceCache,
-            ble_device,
-            self.address,
-            disconnected_callback=self._on_disconnected,
-            max_attempts=CONNECT_ATTEMPTS,
-            # Between attempts the lamp may have become reachable over another path.
-            ble_device_callback=lambda: (
-                bluetooth.async_ble_device_from_address(
-                    self._hass, self.address, connectable=True
-                )
-                or ble_device
-            ),
-        )
+        client = await self._establish(ble_device)
+        if not self._services_known:
+            # After a start of Home Assistant the lamp's services are not known
+            # yet, and the first connection looks them up. On that connection the
+            # lamp accepts a brightness and reads it back, but does not carry it
+            # out; on every later one it does. So close this one and open the
+            # next, which uses the services Home Assistant now remembers.
+            self._services_known = True
+            _LOGGER.debug(
+                "First connection to %s: reconnecting before use", self.address
+            )
+            await self._disconnect(client)
+            client = await self._establish(ble_device)
         self._client = client
         try:
             async with self._lock:
@@ -233,6 +235,23 @@ class FlosStringBLEManager:
         _LOGGER.info("Connected to Flos String Light %s", self.address)
         self.name = name
         self._set_brightness(data, "Read")
+
+    async def _establish(self, ble_device: BLEDevice) -> BleakClient:
+        """Open one connection through the Home Assistant Bluetooth stack."""
+        return await establish_connection(
+            BleakClientWithServiceCache,
+            ble_device,
+            self.address,
+            disconnected_callback=self._on_disconnected,
+            max_attempts=CONNECT_ATTEMPTS,
+            # Between attempts the lamp may have become reachable over another path.
+            ble_device_callback=lambda: (
+                bluetooth.async_ble_device_from_address(
+                    self._hass, self.address, connectable=True
+                )
+                or ble_device
+            ),
+        )
 
     async def _hold(self) -> None:
         """Return when the connection is gone; until then, refresh now and then."""
