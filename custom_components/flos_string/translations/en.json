@@ -24,12 +24,25 @@
       "already_configured": "This device is already configured."
     }
   },
+  "entity": {
+    "text": {
+      "name": {
+        "name": "Name"
+      }
+    }
+  },
   "exceptions": {
     "not_connected": {
       "message": "The lamp is not connected."
     },
     "command_failed": {
       "message": "The lamp did not accept the command: {error}"
+    },
+    "name_empty": {
+      "message": "The name cannot be empty."
+    },
+    "name_too_long": {
+      "message": "The name takes {length} bytes in UTF-8; the lamp stores at most {max}."
     }
   }
 }

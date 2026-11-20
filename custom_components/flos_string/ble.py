@@ -7,6 +7,7 @@ One connection per lamp, open for as long as the config entry is loaded:
   of our own, so every write is followed by a read.
 - Every REFRESH_INTERVAL the brightness is read over the open connection, as a
   safety net for an indication that never came.
+- The lamp's name is read on every connection, and can be written.
 - When the connection drops, the lamp is unavailable at once and a background task
   reconnects: after 5, 10 and 30 seconds, then every minute, and sooner when the
   lamp is seen advertising again.
@@ -28,16 +29,20 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from .const import (
     BRIGHTNESS_CHAR_UUID,
     CONNECT_ATTEMPTS,
+    DEVICE_NAME_CHAR_UUID,
     DOMAIN,
+    NAME_CHAR_UUID,
+    NAME_LENGTH,
     RECONNECT_BACKOFF,
     REFRESH_INTERVAL,
     STABLE_CONNECTION,
 )
+from .util import clean_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +65,8 @@ class FlosStringBLEManager:
         self.address = address
         # 0-100 as the lamp reports it; None until the first read.
         self.brightness: int | None = None
+        # The lamp's own name, without its NUL padding; None when it cannot be read.
+        self.name: str | None = None
         self._client: BleakClient | None = None
         # True once the connection is subscribed and the brightness is read.
         self._ready = False
@@ -80,7 +87,7 @@ class FlosStringBLEManager:
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
-        """Call listener on every change of brightness or availability."""
+        """Call listener on every change of brightness, name or availability."""
         self._listeners.add(listener)
         return lambda: self._listeners.discard(listener)
 
@@ -212,6 +219,7 @@ class FlosStringBLEManager:
                 # Read only now: before the subscription the lamp has been seen to
                 # answer 0 while it was at 100 %.
                 data = await client.read_gatt_char(BRIGHTNESS_CHAR_UUID)
+                name = await self._read_name(client)
         except Exception:
             await self._disconnect(client)
             raise
@@ -221,6 +229,7 @@ class FlosStringBLEManager:
         self._ready = True
         self._outage_logged = False
         _LOGGER.info("Connected to Flos String Light %s", self.address)
+        self.name = name
         self._set_brightness(data, "Read")
 
     async def _hold(self) -> None:
@@ -316,6 +325,63 @@ class FlosStringBLEManager:
         )
         self.brightness = data[0]
         self._notify()
+
+    # ------------------------------------------------------------------------ name
+
+    async def async_set_name(self, name: str) -> None:
+        """Write the lamp's name and read it back.
+
+        The lamp stores NAME_LENGTH bytes of UTF-8, so bytes are counted, not
+        characters. It copies the name to its Device Name at once.
+        """
+        encoded = clean_name(name).encode("utf-8")
+        if not encoded:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="name_empty"
+            )
+        if len(encoded) > NAME_LENGTH:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="name_too_long",
+                translation_placeholders={
+                    "length": str(len(encoded)),
+                    "max": str(NAME_LENGTH),
+                },
+            )
+        async with self._lock:
+            client = self._client
+            if client is None or not self._ready:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="not_connected"
+                )
+            _LOGGER.debug("Writing name %r to %s", encoded, self.address)
+            try:
+                await client.write_gatt_char(
+                    NAME_CHAR_UUID, encoded.ljust(NAME_LENGTH, b"\x00"), response=True
+                )
+            except BLE_ERRORS as err:
+                await self._disconnect(client)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="command_failed",
+                    translation_placeholders={"error": str(err)},
+                ) from err
+            self.name = await self._read_name(client)
+        self._notify()
+
+    async def _read_name(self, client: BleakClient) -> str | None:
+        """Read the Device Name; None when the adapter does not pass it on.
+
+        Some Bluetooth stacks keep the Generic Access service to themselves.
+        """
+        try:
+            data = await client.read_gatt_char(DEVICE_NAME_CHAR_UUID)
+        except BLE_ERRORS as err:
+            _LOGGER.debug("Could not read the name of %s: %s", self.address, err)
+            return None
+        name = clean_name(bytes(data).decode("utf-8", errors="replace"))
+        _LOGGER.debug("Read name %r from %s", name, self.address)
+        return name
 
     # ----------------------------------------------------------------- diagnostics
 

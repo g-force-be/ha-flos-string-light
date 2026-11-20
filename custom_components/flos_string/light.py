@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode, LightEntity
-from homeassistant.const import CONF_ADDRESS, CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import FlosStringConfigEntry
 from .ble import FlosStringBLEManager
-from .const import DEFAULT_BRIGHTNESS_PCT, DOMAIN
-from .util import clean_name
+from .const import DEFAULT_BRIGHTNESS_PCT
+from .entity import FlosStringEntity
 
 
 def ha_to_flos(ha_brightness: int) -> int:
@@ -37,16 +36,10 @@ async def async_setup_entry(
     async_add_entities([FlosStringLight(entry.runtime_data, entry)])
 
 
-class FlosStringLight(LightEntity):
-    """Representation of a Flos String Light.
+class FlosStringLight(FlosStringEntity, LightEntity):
+    """Representation of a Flos String Light."""
 
-    The state comes from the manager, which keeps the connection open and passes
-    on what the lamp reports; nothing is polled here.
-    """
-
-    _attr_has_entity_name = True
     _attr_name = None  # Uses device name
-    _attr_should_poll = False
     _attr_color_mode = ColorMode.BRIGHTNESS
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 
@@ -54,24 +47,13 @@ class FlosStringLight(LightEntity):
         self, manager: FlosStringBLEManager, entry: FlosStringConfigEntry
     ) -> None:
         """Initialize the light."""
-        address: str = entry.data[CONF_ADDRESS]
-        self._manager = manager
-        self._attr_unique_id = address.upper().replace(":", "")
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, address.upper())},
-            # Entries made before the names were cleaned still hold the lamp's
-            # NUL padding.
-            "name": clean_name(entry.data.get(CONF_NAME))
-            or f"Flos String {address[-8:]}",
-            "manufacturer": "Flos",
-            "model": "String Light",
-        }
+        super().__init__(manager, entry)
         # Last non-zero brightness, for turn_on without a brightness.
         self._last_brightness_pct: int = DEFAULT_BRIGHTNESS_PCT
 
     async def async_added_to_hass(self) -> None:
         """Follow the manager from now on."""
-        self.async_on_remove(self._manager.async_add_listener(self._handle_update))
+        await super().async_added_to_hass()
         if self._manager.brightness:
             self._last_brightness_pct = self._manager.brightness
 
@@ -80,12 +62,7 @@ class FlosStringLight(LightEntity):
         """The brightness or the connection changed."""
         if self._manager.brightness:
             self._last_brightness_pct = self._manager.brightness
-        self.async_write_ha_state()
-
-    @property
-    def available(self) -> bool:
-        """Available means connected."""
-        return self._manager.available
+        super()._handle_update()
 
     @property
     def is_on(self) -> bool | None:

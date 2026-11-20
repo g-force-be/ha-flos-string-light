@@ -12,7 +12,7 @@ from .ble import FlosStringBLEManager
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["light"]
+PLATFORMS = ["light", "text"]
 
 type FlosStringConfigEntry = ConfigEntry[FlosStringBLEManager]
 

@@ -5,6 +5,11 @@ DOMAIN = "flos_string"
 # BLE UUIDs (lowercase for Bleak compatibility)
 SERVICE_UUID = "0dcecf0c-ad06-11e3-81e4-425861b86ab6"
 BRIGHTNESS_CHAR_UUID = "335c1504-ad06-11e3-81e4-425861b86ab6"
+# The name is written to the lamp's own characteristic; the lamp copies it to the
+# standard Device Name (Generic Access), which is where it is read.
+NAME_CHAR_UUID = "5be8ef0a-b3d3-11e3-8ed5-425861b86ab6"
+DEVICE_NAME_CHAR_UUID = "00002a00-0000-1000-8000-00805f9b34fb"
+NAME_LENGTH = 18  # bytes of UTF-8; shorter names are padded with NULs
 
 # Default brightness when turning on without specifying (%)
 DEFAULT_BRIGHTNESS_PCT = 100

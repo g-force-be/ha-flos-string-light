@@ -7,7 +7,7 @@ Peters eigen Home Assistant-integratie `flos_string` voor de Flos String Light v
 - `README.md` beschrijft wat de integratie doet, de installatie, de beperkingen en de bekende problemen.
 - `custom_components/flos_string/const.py` bevat de service- en kenmerk-UUID's en de timing.
 - `custom_components/flos_string/ble.py` bevat de BLE-manager: de vaste verbinding per lamp, opnieuw verbinden, lezen en schrijven.
-- `custom_components/flos_string/light.py` bevat de light-entiteit.
+- `custom_components/flos_string/light.py` bevat de light-entiteit, `text.py` de naam-entiteit en `entity.py` wat ze delen.
 
 ## Vaste regels
 - **Peters HA:**
