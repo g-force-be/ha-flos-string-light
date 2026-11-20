@@ -18,22 +18,20 @@ from homeassistant.components.light import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from datetime import timedelta
 
 from .const import (
-    ALT_CHAR_UUID,
     BRIGHTNESS_CHAR_UUID,
-    CONNECT_TIMEOUT,
     DEFAULT_BRIGHTNESS_PCT,
     DISCONNECT_DELAY,
     DOMAIN,
     MAX_RETRIES,
     SCAN_INTERVAL_SECONDS,
-    SERVICE_UUID,
 )
+from .util import clean_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -360,7 +358,8 @@ async def async_setup_entry(
 ) -> None:
     """Set up Flos String Light from a config entry."""
     address = entry.data[CONF_ADDRESS]
-    name = entry.data.get(CONF_NAME, f"Flos String {address[-8:]}")
+    # Entries made before the names were cleaned still hold the lamp's NUL padding.
+    name = clean_name(entry.data.get(CONF_NAME)) or f"Flos String {address[-8:]}"
 
     manager = FlosStringBLEManager(hass, address)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = manager

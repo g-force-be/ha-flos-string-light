@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
 
 from .const import DOMAIN, SERVICE_UUID
+from .util import clean_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle bluetooth discovery."""
         _LOGGER.debug(
             "Discovered Flos String Light: %s (%s)",
-            discovery_info.name,
+            clean_name(discovery_info.name),
             discovery_info.address,
         )
 
@@ -45,11 +46,18 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         self._discovery_info = discovery_info
-        name = discovery_info.name or f"Flos String {discovery_info.address[-8:]}"
 
-        self.context["title_placeholders"] = {"name": name}
+        self.context["title_placeholders"] = {"name": self._discovered_name()}
 
         return await self.async_step_bluetooth_confirm()
+
+    def _discovered_name(self) -> str:
+        """Name of the discovered lamp, without the NULs it pads its name with."""
+        assert self._discovery_info is not None
+        return (
+            clean_name(self._discovery_info.name)
+            or f"Flos String {self._discovery_info.address[-8:]}"
+        )
 
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
@@ -57,12 +65,10 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
         """Confirm discovery of a Flos String Light."""
         assert self._discovery_info is not None
 
+        name = self._discovered_name()
+
         if user_input is not None:
-            name = user_input.get(
-                CONF_NAME,
-                self._discovery_info.name
-                or f"Flos String {self._discovery_info.address[-8:]}",
-            )
+            name = clean_name(user_input.get(CONF_NAME)) or name
             return self.async_create_entry(
                 title=name,
                 data={
@@ -70,8 +76,6 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_NAME: name,
                 },
             )
-
-        name = self._discovery_info.name or f"Flos String {self._discovery_info.address[-8:]}"
 
         return self.async_show_form(
             step_id="bluetooth_confirm",
@@ -99,7 +103,10 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(address)
                 self._abort_if_unique_id_configured()
 
-                name = user_input.get(CONF_NAME, f"Flos String {address[-8:]}")
+                name = (
+                    clean_name(user_input.get(CONF_NAME))
+                    or f"Flos String {address[-8:]}"
+                )
 
                 return self.async_create_entry(
                     title=name,
@@ -113,7 +120,9 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
         discovered: list[str] = []
         for info in async_discovered_service_info(self.hass, connectable=True):
             if SERVICE_UUID in [str(u).lower() for u in info.service_uuids]:
-                discovered.append(f"{info.name or 'Unknown'} ({info.address})")
+                discovered.append(
+                    f"{clean_name(info.name) or 'Unknown'} ({info.address})"
+                )
 
         description_placeholders = {}
         if discovered:
