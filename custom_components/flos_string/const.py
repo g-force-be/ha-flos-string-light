@@ -10,6 +10,10 @@ BRIGHTNESS_CHAR_UUID = "335c1504-ad06-11e3-81e4-425861b86ab6"
 NAME_CHAR_UUID = "5be8ef0a-b3d3-11e3-8ed5-425861b86ab6"
 DEVICE_NAME_CHAR_UUID = "00002a00-0000-1000-8000-00805f9b34fb"
 NAME_LENGTH = 18  # bytes of UTF-8; shorter names are padded with NULs
+# The copy to the Device Name takes a moment: 0.3 s after the write the old name
+# was still there. Read it back this often, this many seconds apart.
+NAME_READBACK_ATTEMPTS = 4
+NAME_READBACK_INTERVAL = 0.5
 
 # Default brightness when turning on without specifying (%)
 DEFAULT_BRIGHTNESS_PCT = 100

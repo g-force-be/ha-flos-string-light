@@ -38,6 +38,8 @@ from .const import (
     DOMAIN,
     NAME_CHAR_UUID,
     NAME_LENGTH,
+    NAME_READBACK_ATTEMPTS,
+    NAME_READBACK_INTERVAL,
     RECONNECT_BACKOFF,
     REFRESH_INTERVAL,
     STABLE_CONNECTION,
@@ -332,9 +334,10 @@ class FlosStringBLEManager:
         """Write the lamp's name and read it back.
 
         The lamp stores NAME_LENGTH bytes of UTF-8, so bytes are counted, not
-        characters. It copies the name to its Device Name at once.
+        characters. It copies the name to its Device Name a moment later.
         """
-        encoded = clean_name(name).encode("utf-8")
+        name = clean_name(name)
+        encoded = name.encode("utf-8")
         if not encoded:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="name_empty"
@@ -366,7 +369,13 @@ class FlosStringBLEManager:
                     translation_key="command_failed",
                     translation_placeholders={"error": str(err)},
                 ) from err
-            self.name = await self._read_name(client)
+            # Read the Device Name until it shows the new name; give up when it
+            # cannot be read, and settle for what it says after the last try.
+            for _ in range(NAME_READBACK_ATTEMPTS):
+                await asyncio.sleep(NAME_READBACK_INTERVAL)
+                self.name = await self._read_name(client)
+                if self.name is None or self.name == name:
+                    break
         self._notify()
 
     async def _read_name(self, client: BleakClient) -> str | None:
