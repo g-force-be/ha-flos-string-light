@@ -4,7 +4,7 @@
 
 A Home Assistant integration for the **Flos String Light**, over Bluetooth Low Energy. Each lamp shows up as a dimmable light (on, off, brightness) and talks to Home Assistant through Home Assistant's own Bluetooth: the adapter in the host or an ESPHome Bluetooth proxy.
 
-> **Status: work in progress.** Home Assistant finds the lamps, connects and writes the brightness, but **the lamp doesn't act on it yet** (see [Known issues](#known-issues)). Reports from other owners are welcome in [Issues](https://github.com/g-force-be/ha-flos-string-light/issues).
+> **Status: working, still young.** Home Assistant finds the lamps, keeps a connection to each one and switches and dims them. So far it runs on the author's lamps through an ESPHome Bluetooth proxy; the host's own adapter is untested. Reports from other owners are welcome in [Issues](https://github.com/g-force-be/ha-flos-string-light/issues).
 
 ## Installation
 
@@ -30,21 +30,32 @@ You need:
 
 - One light entity per lamp. Home Assistant's brightness (0–255) maps to the lamp's 0–100; 0 is off. *Turn on* without a brightness brings back the last one (100 % the first time).
 - The brightness is one byte on characteristic `335c1504-ad06-11e3-81e4-425861b86ab6` of service `0dcecf0c-ad06-11e3-81e4-425861b86ab6`.
-- The integration connects for each command or poll and disconnects 5 seconds after the last one. Each operation gets up to three attempts.
-- Every 60 seconds it reads the brightness, so changes made elsewhere show up within a minute. After a command the entity shows the new state straight away.
+- **One connection per lamp, kept open.** The integration connects when Home Assistant starts and stays connected. Starting never waits for a lamp: the connection is made in the background.
+- **The lamp reports its own level.** After every connection the integration subscribes to the lamp's indications on the brightness characteristic, and those are the state. Nothing is polled.
+- **Safety net.** Every 5 minutes the brightness is read over the open connection, in case an indication never came. After a command the level is read back straight away, because the lamp sends no indication for a change it was told to make.
+- **Available means connected.** When the connection drops, the entities turn *unavailable* at once. The integration reconnects after 5, 10 and 30 seconds and then every minute, and sooner when the lamp is seen advertising again.
+
+What the open connection costs:
+
+- **One connection slot per lamp, permanently.** An ESPHome Bluetooth proxy has three by default, so one proxy carries three lamps and nothing else that needs a connection.
+- **The Flos app cannot connect while Home Assistant is connected.** The lamp accepts one connection at a time. Disable the lamp's entry in Home Assistant for as long as you want to use the app.
+
+## The lamp's name
+
+Each lamp also has a text entity **Name**, under *Configuration* on the device page. It shows the name stored in the lamp, the one it advertises over Bluetooth, and lets you change it.
+
+- The lamp stores 18 bytes of UTF-8. Bytes are counted, not characters: an accented letter takes two or more. A name that doesn't fit is refused.
+- Changing it renames the lamp itself. The device and entity names in Home Assistant stay as they are.
+- The name is written to the lamp's own name characteristic (`5be8ef0a-b3d3-11e3-8ed5-425861b86ab6`); the lamp copies it to the standard Bluetooth Device Name, which is where it is read. Windows and iOS keep that standard characteristic to themselves, so a generic Bluetooth tool there can't read or change the name. Linux does the same on the host's own adapter: there the entity can stay *unknown*, while writing still works.
 
 ## Limitations
 
-- Brightness only.
-- Each poll opens a Bluetooth connection for a few seconds. On an ESPHome proxy that takes one of its connection slots (three by default) for that time, per lamp.
-- When no adapter can see the lamp, the entity keeps its last state instead of turning *unavailable*.
+- Brightness and the name only.
+- One permanent connection slot per lamp, and no Flos app while Home Assistant is connected (see above).
 
 ## Known issues
 
-1. **The lamp doesn't respond.** Writing the brightness succeeds at the Bluetooth level, but the lamp doesn't change. The cause is not known yet and is being investigated.
-2. **Test service `flos_string.gatttool_write`.** Left over from debugging. It needs the `gatttool` program, which Home Assistant OS doesn't have. Don't use it; it will be removed.
-3. **Invisible character in the name.** A lamp found automatically can get a name that ends in a NUL character from its Bluetooth name. Rename the entry if it bothers you; a later version strips it.
-4. **Fixed: "Cannot write to CCCD (0x2902) directly".** The Bluetooth library in Home Assistant 2026.10 refuses that write, and updates failed with a traceback. The integration now subscribes to the characteristic with `start_notify()`.
+- **Invisible character in an old entry's title.** A lamp added with an earlier version can have a title that ends in a NUL character from its Bluetooth name. The device name is cleaned up; rename the entry if the title bothers you. New entries don't get it.
 
 ## Debug logging
 
@@ -56,7 +67,7 @@ logger:
     custom_components.flos_string: debug
 ```
 
-The log then shows each connection, every brightness read and write, and `Subscribed to …` when the lamp offers notifications on the brightness characteristic.
+The log then shows each connection and disconnection, every indication, read and write, and once per start the lamp's full GATT table.
 
 ## Releases and versions
 
