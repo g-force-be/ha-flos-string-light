@@ -23,5 +23,13 @@
     "abort": {
       "already_configured": "This device is already configured."
     }
+  },
+  "exceptions": {
+    "not_connected": {
+      "message": "The lamp is not connected."
+    },
+    "command_failed": {
+      "message": "The lamp did not accept the command: {error}"
+    }
   }
 }

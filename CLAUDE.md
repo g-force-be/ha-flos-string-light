@@ -6,7 +6,8 @@ Peters eigen Home Assistant-integratie `flos_string` voor de Flos String Light v
 - `docs/CLAUDE_CODE_PROMPT.md` is de startopdracht: omgeving (HAOS, lampen, Bluetooth-paden), bekende problemen en de stappen. Het bestand staat alleen lokaal (in `.gitignore`), net als `docs/LOCAL.md`.
 - `README.md` beschrijft wat de integratie doet, de installatie, de beperkingen en de bekende problemen.
 - `custom_components/flos_string/const.py` bevat de service- en kenmerk-UUID's en de timing.
-- `custom_components/flos_string/light.py` bevat de BLE-manager (verbinden, lezen, schrijven) en de light-entiteit.
+- `custom_components/flos_string/ble.py` bevat de BLE-manager: de vaste verbinding per lamp, opnieuw verbinden, lezen en schrijven.
+- `custom_components/flos_string/light.py` bevat de light-entiteit.
 
 ## Vaste regels
 - **Peters HA:**
