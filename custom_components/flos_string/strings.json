@@ -25,6 +25,11 @@
     }
   },
   "entity": {
+    "button": {
+      "reconnect": {
+        "name": "Reconnect"
+      }
+    },
     "text": {
       "name": {
         "name": "Name"

@@ -82,6 +82,8 @@ class FlosStringBLEManager:
         self._stopped = False
         self._outage_logged = False
         self._gatt_logged = False
+        # Set by async_reconnect(): the next connection is opened without backoff.
+        self._reconnect_requested = False
 
     @property
     def available(self) -> bool:
@@ -172,6 +174,11 @@ class FlosStringBLEManager:
             else:
                 connected_at = time.monotonic()
                 await self._hold()
+                if self._reconnect_requested:
+                    # Asked for, and the lamp was there a moment ago: no backoff.
+                    self._reconnect_requested = False
+                    step = 0
+                    continue
                 if time.monotonic() - connected_at >= STABLE_CONNECTION:
                     step = 0
             delay = RECONNECT_BACKOFF[min(step, len(RECONNECT_BACKOFF) - 1)]
@@ -299,6 +306,18 @@ class FlosStringBLEManager:
             _LOGGER.info("Flos String Light %s disconnected", self.address)
             self._outage_logged = True
         self._notify()
+
+    async def async_reconnect(self) -> None:
+        """Close the connection; the loop in _run() opens a new one at once."""
+        async with self._lock:
+            client = self._client
+            if client is None or not self._ready:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="not_connected"
+                )
+            _LOGGER.debug("Reconnecting to %s on request", self.address)
+            self._reconnect_requested = True
+            await self._disconnect(client)
 
     # ------------------------------------------------------------------ brightness
 
