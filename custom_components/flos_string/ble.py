@@ -82,8 +82,6 @@ class FlosStringBLEManager:
         self._stopped = False
         self._outage_logged = False
         self._gatt_logged = False
-        # False until this manager has connected once; see _connect().
-        self._services_known = False
 
     @property
     def available(self) -> bool:
@@ -200,19 +198,17 @@ class FlosStringBLEManager:
 
         _LOGGER.debug("Connecting to Flos String Light %s", self.address)
         self._disconnected.clear()
+        # Every connection is opened, closed and opened again before it is used.
+        # Home Assistant remembers the lamp's services, but forgets them when it
+        # restarts and when the Bluetooth proxy reconnects. A connection that has
+        # to look them up is no good: the lamp accepts a brightness and reads it
+        # back without carrying it out, or the connection stalls. The one opened
+        # right after it uses the remembered services and works. Which kind a
+        # connection is cannot be seen from here, so the first is never used.
         client = await self._establish(ble_device)
-        if not self._services_known:
-            # After a start of Home Assistant the lamp's services are not known
-            # yet, and the first connection looks them up. On that connection the
-            # lamp accepts a brightness and reads it back, but does not carry it
-            # out; on every later one it does. So close this one and open the
-            # next, which uses the services Home Assistant now remembers.
-            self._services_known = True
-            _LOGGER.debug(
-                "First connection to %s: reconnecting before use", self.address
-            )
-            await self._disconnect(client)
-            client = await self._establish(ble_device)
+        _LOGGER.debug("Reached %s: reconnecting before use", self.address)
+        await self._disconnect(client)
+        client = await self._establish(ble_device)
         self._client = client
         try:
             async with self._lock:
