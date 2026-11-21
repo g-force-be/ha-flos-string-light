@@ -40,7 +40,11 @@ async def async_setup_entry(
 
 
 class FlosStringSensor(FlosStringEntity, SensorEntity):
-    """A sensor of one lamp, under Diagnostic on the device page."""
+    """A sensor of one lamp, under Diagnostic on the device page.
+
+    It shows the signal of a lamp that advertises, also when connecting to it
+    fails: that is when the signal matters most.
+    """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _key: str
@@ -51,6 +55,11 @@ class FlosStringSensor(FlosStringEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(manager, entry)
         self._attr_unique_id = f"{self._attr_unique_id}_{self._key}"
+
+    @property
+    def available(self) -> bool:
+        """Available while a proxy hears the lamp, also when it cannot be reached."""
+        return self._manager.rssi is not None
 
 
 class FlosStringSignal(FlosStringSensor):

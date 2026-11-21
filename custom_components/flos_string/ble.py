@@ -400,11 +400,12 @@ class FlosStringBLEManager:
         retry_at = 0.0  # after a connection that failed: no new one before this
         while True:
             self._wake.clear()
-            self._update_signal()
+            advertising = self._advertising()
+            self._update_signal(advertising)
             now = time.monotonic()
             # Seconds until there may be something to do.
             waits = [self._power_check_interval] if self._power_check_interval else []
-            if not self._advertising():
+            if not advertising:
                 # No power. Nothing connects until the lamp advertises again.
                 self._set_reachable(False, "the lamp does not advertise")
                 step, retry_at = 0, 0.0
@@ -461,14 +462,21 @@ class FlosStringBLEManager:
         return silence <= self._power_check_interval
 
     @callback
-    def _update_signal(self) -> None:
+    def _update_signal(self, advertising: bool) -> None:
         """Note which proxy hears the lamp best, and how well. No connection.
+
+        None for a lamp that stopped advertising: Home Assistant remembers its
+        last signal for some minutes more.
 
         Home Assistant connects through the path with the best signal that has
         a free slot; a path that failed lately counts a little less.
         """
-        paths = bluetooth.async_scanner_devices_by_address(
-            self._hass, self.address, connectable=True
+        paths = (
+            bluetooth.async_scanner_devices_by_address(
+                self._hass, self.address, connectable=True
+            )
+            if advertising
+            else []
         )
         best = max(paths, key=lambda path: path.advertisement.rssi, default=None)
         proxy, rssi = (
