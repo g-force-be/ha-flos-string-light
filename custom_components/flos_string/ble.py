@@ -11,12 +11,22 @@ One connection per lamp, open for as long as the config entry is loaded:
 - When the connection drops, the lamp is unavailable at once and a background task
   reconnects: after 5, 10 and 30 seconds, then every minute, and sooner when the
   lamp is seen advertising again.
+
+Or, as an option per lamp, a connection only when it is needed ("on demand"):
+
+- A change connects, writes, reads back and disconnects. So does a read of the
+  state: at the start, every poll interval and when the lamp advertises again.
+- All lamps that connect on demand take turns, so that no two are connected at
+  once. A connection made while the Bluetooth proxy holds another lamp reaches a
+  lamp that reads a brightness back without carrying it out.
+- A lamp that is not connected advertises. One that stops advertising has no
+  power: it is unavailable, and nothing connects to it until it advertises again.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import contextlib
 import logging
 import time
@@ -52,6 +62,9 @@ _LOGGER = logging.getLogger(__name__)
 # What a Bluetooth operation raises when the lamp or the adapter lets go.
 BLE_ERRORS = (BleakError, TimeoutError, OSError, EOFError)
 
+# Key in hass.data of the lock that the lamps connecting on demand share.
+DATA_TURN = f"{DOMAIN}_turn"
+
 
 def _describe(value: bytes) -> str:
     """Hex plus printable ASCII, for the GATT table in the debug log."""
@@ -60,12 +73,31 @@ def _describe(value: bytes) -> str:
 
 
 class FlosStringBLEManager:
-    """Keep the connection to one lamp open, and read and write over it."""
+    """The connection to one lamp, kept open or made on demand."""
 
-    def __init__(self, hass: HomeAssistant, address: str) -> None:
-        """Initialize the manager; async_start() opens the connection."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        address: str,
+        *,
+        on_demand: bool = False,
+        poll_interval: float = REFRESH_INTERVAL,
+    ) -> None:
+        """Initialize the manager; async_start() opens the connection.
+
+        on_demand: connect only for a change or a read, and disconnect after it.
+        poll_interval: seconds between reads on demand; 0 is never.
+        """
         self._hass = hass
         self.address = address
+        self.on_demand = on_demand
+        self._poll_interval = poll_interval
+        # On demand: True once the state is read; False after a connection that
+        # failed and when the lamp stops advertising.
+        self._reachable = False
+        # On demand: when the last connection ended, and a request to read now.
+        self._last_visit = 0.0
+        self._read_wanted = asyncio.Event()
         # 0-100 as the lamp reports it; None until the first read.
         self.brightness: int | None = None
         # The lamp's own name, without its NUL padding; None when it cannot be read.
@@ -87,8 +119,11 @@ class FlosStringBLEManager:
 
     @property
     def available(self) -> bool:
-        """Return True while the lamp is connected and its state is known."""
-        return self._ready
+        """Return True while the lamp is connected and its state is known.
+
+        On demand the lamp is not connected: True while it can be reached.
+        """
+        return self._reachable if self.on_demand else self._ready
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -124,8 +159,16 @@ class FlosStringBLEManager:
                 EVENT_HOMEASSISTANT_STOP, self._on_hass_stop
             )
         )
+        if self.on_demand:
+            entry.async_on_unload(
+                bluetooth.async_track_unavailable(
+                    self._hass, self._on_unavailable, self.address, connectable=True
+                )
+            )
         self._task = entry.async_create_background_task(
-            self._hass, self._run(), f"{DOMAIN} connection {self.address}"
+            self._hass,
+            self._run_on_demand() if self.on_demand else self._run(),
+            f"{DOMAIN} connection {self.address}",
         )
 
     async def async_stop(self) -> None:
@@ -238,7 +281,12 @@ class FlosStringBLEManager:
 
         self._ready = True
         self._outage_logged = False
-        _LOGGER.info("Connected to Flos String Light %s", self.address)
+        # On demand this happens every poll interval: not worth a line at info.
+        _LOGGER.log(
+            logging.DEBUG if self.on_demand else logging.INFO,
+            "Connected to Flos String Light %s",
+            self.address,
+        )
         self.name = name
         self._set_brightness(data, "Read")
 
@@ -302,10 +350,124 @@ class FlosStringBLEManager:
         if not self._ready:
             return
         self._ready = False
+        if self.on_demand:
+            return  # every connection on demand ends like this
         if not self._stopped:
             _LOGGER.info("Flos String Light %s disconnected", self.address)
             self._outage_logged = True
         self._notify()
+
+    # ------------------------------------------------------------------ on demand
+
+    async def _run_on_demand(self) -> None:
+        """Read the state at the start, every poll interval and when the lamp is back."""
+        step = 0  # position in RECONNECT_BACKOFF since the lamp was last reached
+        while True:
+            self._advertised.clear()
+            self._read_wanted.clear()
+            advertising = bluetooth.async_address_present(
+                self._hass, self.address, connectable=True
+            )
+            if advertising:
+                try:
+                    await self._visit()
+                except HomeAssistantError:
+                    pass  # _visit() logged it, and the lamp is unavailable
+                except Exception:  # noqa: BLE001 - a bug must not end the loop
+                    _LOGGER.exception("Unexpected error reading %s", self.address)
+                    self._set_reachable(False, "unexpected error")
+            else:
+                self._set_reachable(False, "the lamp does not advertise")
+            if self._reachable:
+                step = 0
+                await self._wait_for_poll()
+            elif not advertising:
+                # No power. The lamp advertises as soon as it has it back.
+                await self._advertised.wait()
+            else:
+                delay = RECONNECT_BACKOFF[min(step, len(RECONNECT_BACKOFF) - 1)]
+                step += 1
+                await self._wait_before_retry(delay)
+
+    async def _wait_for_poll(self) -> None:
+        """Wait one poll interval since the last connection, or until asked.
+
+        A change is a connection too and reads the state, so it postpones the poll.
+        """
+        while not self._read_wanted.is_set():
+            remaining = None  # no polling: wait until asked
+            if self._poll_interval:
+                remaining = self._last_visit + self._poll_interval - time.monotonic()
+                if remaining <= 0:
+                    return
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(remaining):
+                    await self._read_wanted.wait()
+
+    async def _visit(self, action: Callable[[], Awaitable[None]] | None = None) -> None:
+        """Connect, read the state, do one thing and disconnect.
+
+        All lamps share one lock for this, so they take turns: a connection made
+        while the Bluetooth proxy holds another lamp reaches a lamp that reads a
+        brightness back without carrying it out.
+        """
+        async with self._hass.data.setdefault(DATA_TURN, asyncio.Lock()):
+            if self._stopped:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="not_connected"
+                )
+            try:
+                await self._connect()
+            except BLE_ERRORS as err:
+                self._last_visit = time.monotonic()
+                self._set_reachable(False, str(err))
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="not_reachable",
+                    translation_placeholders={"error": str(err)},
+                ) from err
+            try:
+                self._set_reachable(True)
+                if action is not None:
+                    await action()
+            finally:
+                if (client := self._client) is not None:
+                    await self._disconnect(client)
+                self._last_visit = time.monotonic()
+
+    @callback
+    def _set_reachable(self, reachable: bool, reason: str = "") -> None:
+        """Keep track of whether the lamp can be reached; that is its availability."""
+        if not reachable:
+            # Once at info level per outage; a lamp without power fails for days.
+            _LOGGER.log(
+                logging.DEBUG if self._outage_logged else logging.INFO,
+                "Flos String Light %s is not reachable: %s",
+                self.address,
+                reason,
+            )
+            self._outage_logged = True
+        if reachable == self._reachable:
+            return
+        self._reachable = reachable
+        if reachable:
+            _LOGGER.info("Flos String Light %s is reachable", self.address)
+        else:
+            self._read_wanted.set()  # the loop in _run_on_demand() takes over
+        self._notify()
+
+    @callback
+    def _on_unavailable(
+        self, _service_info: bluetooth.BluetoothServiceInfoBleak
+    ) -> None:
+        """Home Assistant no longer sees the lamp advertise: it has no power."""
+        self._set_reachable(False, "the lamp stopped advertising")
+
+    async def async_refresh(self) -> None:
+        """On demand: connect, read the state and disconnect."""
+        await self._visit()
+
+    # --------------------------------------------------------------- stay connected
 
     async def async_reconnect(self) -> None:
         """Close the connection; the loop in _run() opens a new one at once."""
@@ -323,6 +485,12 @@ class FlosStringBLEManager:
 
     async def async_set_brightness(self, value: int) -> None:
         """Write the brightness (0-100, 0 is off) and read it back."""
+        if self.on_demand:
+            await self._visit(lambda: self._write_brightness(value))
+        else:
+            await self._write_brightness(value)
+
+    async def _write_brightness(self, value: int) -> None:
         async with self._lock:
             client = self._client
             if client is None or not self._ready:
@@ -388,6 +556,12 @@ class FlosStringBLEManager:
                     "max": str(NAME_LENGTH),
                 },
             )
+        if self.on_demand:
+            await self._visit(lambda: self._write_name(name, encoded))
+        else:
+            await self._write_name(name, encoded)
+
+    async def _write_name(self, name: str, encoded: bytes) -> None:
         async with self._lock:
             client = self._client
             if client is None or not self._ready:

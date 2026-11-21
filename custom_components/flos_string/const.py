@@ -23,3 +23,10 @@ CONNECT_ATTEMPTS = 2  # tries within one connection attempt, before the backoff
 RECONNECT_BACKOFF = (5, 10, 30, 60)  # waits between attempts; the last one repeats
 STABLE_CONNECTION = 60  # a connection that lasted this long resets the backoff
 REFRESH_INTERVAL = 300  # safety-net read of the brightness over the open connection
+
+# Options of a lamp: how Home Assistant connects to it.
+CONF_CONNECTION = "connection"
+CONNECTION_ALWAYS = "always"  # one connection, kept open
+CONNECTION_ON_DEMAND = "on_demand"  # connect for a change or a read, then disconnect
+CONF_POLL_INTERVAL = "poll_interval"  # minutes between reads on demand; 0 is never
+DEFAULT_POLL_INTERVAL = 5
