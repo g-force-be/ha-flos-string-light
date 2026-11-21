@@ -40,6 +40,22 @@ What the open connection costs:
 
 - **One connection slot per lamp, permanently.** An ESPHome Bluetooth proxy has three by default, so one proxy carries three lamps and nothing else that needs a connection.
 - **The Flos app cannot connect while Home Assistant is connected.** The lamp accepts one connection at a time. Disable the lamp's entry in Home Assistant for as long as you want to use the app.
+- **Two lamps on one Bluetooth proxy don't both work.** The lamp that connects while the proxy already holds another lamp accepts a brightness and reads it back, but doesn't carry it out. The lamp that was connected first keeps working. Seen with an ESPHome Bluetooth proxy. Use *Connect only when needed* (below) for the lamps on such a proxy.
+
+## Connecting only when needed
+
+Each lamp has two settings, under *Settings → Devices & services → Flos String Light → Configure* (the gear next to the lamp):
+
+- **Connection:** *Stay connected* (the default, described above) or *Connect only when needed*.
+- **Poll interval**, in minutes. Only used with *Connect only when needed*.
+
+With *Connect only when needed*:
+
+- **A change connects, writes, reads the result back and disconnects.** That takes a few seconds.
+- **Lamps take turns.** No two lamps are connected at the same moment, so the problem with two lamps on one proxy doesn't occur. Set all lamps on the same proxy to *Connect only when needed*: a lamp that stays connected spoils it for the others.
+- **The state is read when Home Assistant starts, every poll interval and when the lamp advertises again.** With a poll interval of 0 it is never read in between; the state is then what Home Assistant last set. A change made with the Flos app or the dimmer on the cord shows up at the next read.
+- **A lamp that stops advertising has no power.** A lamp that isn't connected advertises. When Home Assistant no longer sees it, the lamp turns *unavailable* and nothing connects to it until it advertises again. Home Assistant needs a few minutes to notice that a lamp has gone silent.
+- **The Flos app can connect**, except during the seconds of a change or a read.
 
 ## The lamp's name
 
@@ -53,12 +69,14 @@ Each lamp also has a text entity **Name**, under *Configuration* on the device p
 ## Reconnect and device information
 
 - Each lamp has a button **Reconnect**, under *Configuration* on the device page. It closes the connection to the lamp and opens a new one straight away. Use it when a lamp is connected but doesn't do what it is told.
+- A lamp set to *Connect only when needed* has a button **Refresh** instead. It connects, reads the lamp's state and disconnects.
 - The device page shows the lamp's Bluetooth address. The lamp offers nothing else to show: no firmware version and no serial number.
 
 ## Limitations
 
 - Brightness and the name only.
-- One permanent connection slot per lamp, and no Flos app while Home Assistant is connected (see above).
+- While a lamp stays connected: one permanent connection slot per lamp, no Flos app, and only one lamp per Bluetooth proxy (see above).
+- With *Connect only when needed*: a few seconds per change, and a state that can lag behind until the next read.
 
 ## Known issues
 
