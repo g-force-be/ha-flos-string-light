@@ -47,7 +47,13 @@ Each lamp also has a text entity **Name**, under *Configuration* on the device p
 
 - The lamp stores 18 bytes of UTF-8. Bytes are counted, not characters: an accented letter takes two or more. A name that doesn't fit is refused.
 - Changing it renames the lamp itself. The device and entity names in Home Assistant stay as they are.
+- A lamp with an empty name shows as *unknown*. Type a name to give it one.
 - The name is written to the lamp's own name characteristic (`5be8ef0a-b3d3-11e3-8ed5-425861b86ab6`); the lamp copies it to the standard Bluetooth Device Name, which is where it is read. Windows and iOS keep that standard characteristic to themselves, so a generic Bluetooth tool there can't read or change the name. Linux does the same on the host's own adapter: there the entity can stay *unknown*, while writing still works.
+
+## Reconnect and device information
+
+- Each lamp has a button **Reconnect**, under *Configuration* on the device page. It closes the connection to the lamp and opens a new one straight away. Use it when a lamp is connected but doesn't do what it is told.
+- The device page shows the lamp's Bluetooth address. The lamp offers nothing else to show: no firmware version and no serial number.
 
 ## Limitations
 
