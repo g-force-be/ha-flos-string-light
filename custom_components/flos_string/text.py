@@ -43,8 +43,12 @@ class FlosStringName(FlosStringEntity, TextEntity):
 
     @property
     def native_value(self) -> str | None:
-        """Return the lamp's name, without its NUL padding."""
-        return self._manager.name
+        """Return the lamp's name, without its NUL padding.
+
+        A lamp can have an empty name. A text entity cannot show one, it needs
+        at least one character, so an empty name is unknown here.
+        """
+        return self._manager.name or None
 
     async def async_set_value(self, value: str) -> None:
         """Write a new name to the lamp."""
