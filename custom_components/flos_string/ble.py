@@ -97,7 +97,10 @@ class FlosStringBLEManager:
     @callback
     def _notify(self) -> None:
         for listener in list(self._listeners):
-            listener()
+            try:
+                listener()
+            except Exception:  # noqa: BLE001 - an entity's bug must not cost the connection
+                _LOGGER.exception("Error updating an entity of %s", self.address)
 
     # ------------------------------------------------------------------ lifecycle
 
