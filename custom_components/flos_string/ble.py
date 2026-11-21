@@ -16,6 +16,8 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
 
 - A change connects, writes, reads back and disconnects. So does a read of the
   state: at the start, every poll interval and when the lamp advertises again.
+- Only the last brightness asked for is written: one that still waits, for
+  its turn or for the lamp to connect, is replaced by the next.
 - All lamps that connect on demand take turns, so that no two are connected at
   once. A connection made while the Bluetooth proxy holds another lamp reaches a
   lamp that reads a brightness back without carrying it out.
@@ -111,6 +113,11 @@ class FlosStringBLEManager:
         # its signal in dBm; None when none hears it.
         self.proxy: str | None = None
         self.rssi: int | None = None
+        # On demand: the brightness that waits to be written, and the task that
+        # writes it and what is asked for meanwhile.
+        self._wanted: int | None = None
+        self._change: asyncio.Task[None] | None = None
+        self._entry: ConfigEntry | None = None
         # 0-100 as the lamp reports it; None until the first read.
         self.brightness: int | None = None
         # The lamp's own name, without its NUL padding; None when it cannot be read.
@@ -157,6 +164,7 @@ class FlosStringBLEManager:
     @callback
     def async_start(self, entry: ConfigEntry) -> None:
         """Connect in the background, so the setup never waits for the lamp."""
+        self._entry = entry
         entry.async_on_unload(
             bluetooth.async_register_callback(
                 self._hass,
@@ -192,6 +200,9 @@ class FlosStringBLEManager:
             self._task = None
             task.cancel()
             await asyncio.wait([task])
+        if (change := self._change) is not None and not change.done():
+            change.cancel()
+            await asyncio.wait([change])
         if (client := self._client) is not None:
             await self._disconnect(client)
 
@@ -541,10 +552,48 @@ class FlosStringBLEManager:
 
     async def async_set_brightness(self, value: int) -> None:
         """Write the brightness (0-100, 0 is off) and read it back."""
-        if self.on_demand:
-            await self._visit(lambda: self._write_brightness(value))
-        else:
+        if not self.on_demand:
             await self._write_brightness(value)
+            return
+        if self._stopped or self._entry is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="not_connected"
+            )
+        # Every change is a connection, and the lamp does not stand many of
+        # them in a short time. So a brightness that still waits is replaced.
+        if self._wanted is not None:
+            _LOGGER.debug(
+                "Brightness %d for %s replaces %d, which was not written yet",
+                value,
+                self.address,
+                self._wanted,
+            )
+        self._wanted = value
+        if self._change is None or self._change.done():
+            self._change = self._entry.async_create_background_task(
+                self._hass,
+                self._write_wanted(),
+                f"{DOMAIN} change {self.address}",
+            )
+        # Everyone who asked waits for the same task: it ends when nothing
+        # waits any more, or with the error that all of them get.
+        await asyncio.shield(self._change)
+
+    async def _write_wanted(self) -> None:
+        """Write the brightness that waits, and what is asked for meanwhile."""
+
+        async def write() -> None:
+            # Taken at the last moment: once the lamp is connected.
+            value, self._wanted = self._wanted, None
+            if value is not None:
+                await self._write_brightness(value)
+
+        try:
+            while self._wanted is not None:
+                await self._visit(write)
+        finally:
+            # After an error: what waited is not written later.
+            self._wanted = None
 
     async def _write_brightness(self, value: int) -> None:
         async with self._lock:
