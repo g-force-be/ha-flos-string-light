@@ -16,8 +16,8 @@ from .util import clean_name
 class FlosStringEntity(Entity):
     """An entity of one lamp.
 
-    The state comes from the manager, which keeps the connection open and passes
-    on what the lamp reports; nothing is polled here.
+    The state comes from the manager, which talks to the lamp and passes on what
+    it reports; nothing is polled here.
     """
 
     _attr_has_entity_name = True
@@ -53,5 +53,5 @@ class FlosStringEntity(Entity):
 
     @property
     def available(self) -> bool:
-        """Available means connected."""
+        """Available means connected; on demand, that the lamp can be reached."""
         return self._manager.available

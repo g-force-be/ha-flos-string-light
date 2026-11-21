@@ -9,6 +9,13 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
 
 from .ble import FlosStringBLEManager
+from .const import (
+    CONF_CONNECTION,
+    CONF_POLL_INTERVAL,
+    CONNECTION_ALWAYS,
+    CONNECTION_ON_DEMAND,
+    DEFAULT_POLL_INTERVAL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +29,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
     address = entry.data[CONF_ADDRESS]
     _LOGGER.debug("Setting up Flos String Light: %s", address)
 
-    manager = FlosStringBLEManager(hass, address)
+    options = entry.options
+    manager = FlosStringBLEManager(
+        hass,
+        address,
+        on_demand=options.get(CONF_CONNECTION, CONNECTION_ALWAYS)
+        == CONNECTION_ON_DEMAND,
+        # Minutes in the options, seconds in the manager.
+        poll_interval=options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL) * 60,
+    )
     entry.runtime_data = manager
     # Connects in the background: the setup must not wait for, or fail on, a lamp
     # that is out of reach.

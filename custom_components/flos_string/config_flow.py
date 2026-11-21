@@ -12,15 +12,61 @@ from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
 )
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
+from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
-from .const import DOMAIN, SERVICE_UUID
+from .const import (
+    CONF_CONNECTION,
+    CONF_POLL_INTERVAL,
+    CONNECTION_ALWAYS,
+    CONNECTION_ON_DEMAND,
+    DEFAULT_POLL_INTERVAL,
+    DOMAIN,
+    SERVICE_UUID,
+)
 from .util import clean_name
 
 _LOGGER = logging.getLogger(__name__)
 
 MAC_REGEX = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+
+OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_CONNECTION, default=CONNECTION_ALWAYS): SelectSelector(
+            SelectSelectorConfig(
+                options=[CONNECTION_ALWAYS, CONNECTION_ON_DEMAND],
+                translation_key=CONF_CONNECTION,
+                mode=SelectSelectorMode.LIST,
+            )
+        ),
+        vol.Required(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): vol.All(
+            NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=1440,
+                    step=1,
+                    unit_of_measurement="min",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Coerce(int),
+        ),
+    }
+)
 
 
 class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -31,6 +77,12 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._discovery_info: BluetoothServiceInfoBleak | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> FlosStringOptionsFlow:
+        """Return the options flow of a lamp."""
+        return FlosStringOptionsFlow()
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -138,4 +190,21 @@ class FlosStringConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
             description_placeholders=description_placeholders,
+        )
+
+
+class FlosStringOptionsFlow(OptionsFlowWithReload):
+    """How Home Assistant connects to a lamp; saving reloads the lamp's entry."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose between staying connected and connecting on demand."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(
+                OPTIONS_SCHEMA, self.config_entry.options
+            ),
         )
