@@ -51,6 +51,11 @@
         "name": "Refresh"
       }
     },
+    "sensor": {
+      "proxy": {
+        "name": "Bluetooth proxy"
+      }
+    },
     "text": {
       "name": {
         "name": "Name"

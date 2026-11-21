@@ -21,7 +21,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["button", "light", "text"]
+PLATFORMS = ["button", "light", "sensor", "text"]
 
 type FlosStringConfigEntry = ConfigEntry[FlosStringBLEManager]
 

@@ -22,6 +22,8 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
 - A lamp that is not connected advertises. One that stops advertising has no
   power: it is unavailable, and nothing connects to it until it advertises again.
   That is checked every power check interval, without a connection.
+- At the same moments the manager notes which Bluetooth proxy hears the lamp
+  best and how well: the path Home Assistant takes for the next connection.
 """
 
 from __future__ import annotations
@@ -105,6 +107,10 @@ class FlosStringBLEManager:
         self._last_visit = 0.0
         self._last_contact = 0.0
         self._wake = asyncio.Event()
+        # On demand: the Bluetooth adapter or proxy that hears the lamp best, and
+        # its signal in dBm; None when none hears it.
+        self.proxy: str | None = None
+        self.rssi: int | None = None
         # 0-100 as the lamp reports it; None until the first read.
         self.brightness: int | None = None
         # The lamp's own name, without its NUL padding; None when it cannot be read.
@@ -376,6 +382,7 @@ class FlosStringBLEManager:
         retry_at = 0.0  # after a connection that failed: no new one before this
         while True:
             self._wake.clear()
+            self._update_signal()
             now = time.monotonic()
             # Seconds until there may be something to do.
             waits = [self._power_check_interval] if self._power_check_interval else []
@@ -434,6 +441,24 @@ class FlosStringBLEManager:
             "Flos String Light %s last advertised %.0f s ago", self.address, silence
         )
         return silence <= self._power_check_interval
+
+    @callback
+    def _update_signal(self) -> None:
+        """Note which proxy hears the lamp best, and how well. No connection.
+
+        Home Assistant connects through the path with the best signal that has
+        a free slot; a path that failed lately counts a little less.
+        """
+        paths = bluetooth.async_scanner_devices_by_address(
+            self._hass, self.address, connectable=True
+        )
+        best = max(paths, key=lambda path: path.advertisement.rssi, default=None)
+        proxy, rssi = (
+            (best.scanner.name, best.advertisement.rssi) if best else (None, None)
+        )
+        if (proxy, rssi) != (self.proxy, self.rssi):
+            self.proxy, self.rssi = proxy, rssi
+            self._notify()
 
     async def _visit(self, action: Callable[[], Awaitable[None]] | None = None) -> None:
         """Connect, read the state, do one thing and disconnect.
