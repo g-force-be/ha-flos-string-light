@@ -21,6 +21,7 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
   lamp that reads a brightness back without carrying it out.
 - A lamp that is not connected advertises. One that stops advertising has no
   power: it is unavailable, and nothing connects to it until it advertises again.
+  That is checked every power check interval, without a connection.
 """
 
 from __future__ import annotations
@@ -82,22 +83,28 @@ class FlosStringBLEManager:
         *,
         on_demand: bool = False,
         poll_interval: float = REFRESH_INTERVAL,
+        power_check_interval: float = 0,
     ) -> None:
         """Initialize the manager; async_start() opens the connection.
 
         on_demand: connect only for a change or a read, and disconnect after it.
         poll_interval: seconds between reads on demand; 0 is never.
+        power_check_interval: seconds between checks, on demand, that the lamp
+        still advertises; 0 leaves it to Home Assistant, which takes minutes.
         """
         self._hass = hass
         self.address = address
         self.on_demand = on_demand
         self._poll_interval = poll_interval
+        self._power_check_interval = power_check_interval
         # On demand: True once the state is read; False after a connection that
         # failed and when the lamp stops advertising.
         self._reachable = False
-        # On demand: when the last connection ended, and a request to read now.
+        # On demand: when the last connection attempt ended, and when the last
+        # connection that was made ended; set when the loop has to look again.
         self._last_visit = 0.0
-        self._read_wanted = asyncio.Event()
+        self._last_contact = 0.0
+        self._wake = asyncio.Event()
         # 0-100 as the lamp reports it; None until the first read.
         self.brightness: int | None = None
         # The lamp's own name, without its NUL padding; None when it cannot be read.
@@ -193,6 +200,7 @@ class FlosStringBLEManager:
     ) -> None:
         """The lamp advertises (it does not while connected): cut the wait short."""
         self._advertised.set()
+        self._wake.set()
 
     # ----------------------------------------------------------- connection loop
 
@@ -360,15 +368,28 @@ class FlosStringBLEManager:
     # ------------------------------------------------------------------ on demand
 
     async def _run_on_demand(self) -> None:
-        """Read the state at the start, every poll interval and when the lamp is back."""
+        """Read the state at the start, every poll interval and when the lamp is back.
+
+        In between, check every power check interval that the lamp still advertises.
+        """
         step = 0  # position in RECONNECT_BACKOFF since the lamp was last reached
+        retry_at = 0.0  # after a connection that failed: no new one before this
         while True:
-            self._advertised.clear()
-            self._read_wanted.clear()
-            advertising = bluetooth.async_address_present(
-                self._hass, self.address, connectable=True
-            )
-            if advertising:
+            self._wake.clear()
+            now = time.monotonic()
+            # Seconds until there may be something to do.
+            waits = [self._power_check_interval] if self._power_check_interval else []
+            if not self._advertising():
+                # No power. Nothing connects until the lamp advertises again.
+                self._set_reachable(False, "the lamp does not advertise")
+                step, retry_at = 0, 0.0
+            elif self._reachable and not self._poll_interval:
+                pass  # no polling: the state is what was last read or set
+            elif self._reachable and now < self._last_visit + self._poll_interval:
+                waits.append(self._last_visit + self._poll_interval - now)
+            elif not self._reachable and now < retry_at:
+                waits.append(retry_at - now)
+            else:
                 try:
                     await self._visit()
                 except HomeAssistantError:
@@ -376,33 +397,43 @@ class FlosStringBLEManager:
                 except Exception:  # noqa: BLE001 - a bug must not end the loop
                     _LOGGER.exception("Unexpected error reading %s", self.address)
                     self._set_reachable(False, "unexpected error")
-            else:
-                self._set_reachable(False, "the lamp does not advertise")
-            if self._reachable:
-                step = 0
-                await self._wait_for_poll()
-            elif not advertising:
-                # No power. The lamp advertises as soon as it has it back.
-                await self._advertised.wait()
-            else:
-                delay = RECONNECT_BACKOFF[min(step, len(RECONNECT_BACKOFF) - 1)]
-                step += 1
-                await self._wait_before_retry(delay)
-
-    async def _wait_for_poll(self) -> None:
-        """Wait one poll interval since the last connection, or until asked.
-
-        A change is a connection too and reads the state, so it postpones the poll.
-        """
-        while not self._read_wanted.is_set():
-            remaining = None  # no polling: wait until asked
-            if self._poll_interval:
-                remaining = self._last_visit + self._poll_interval - time.monotonic()
-                if remaining <= 0:
-                    return
+                if self._reachable:
+                    step = 0
+                else:
+                    delay = RECONNECT_BACKOFF[min(step, len(RECONNECT_BACKOFF) - 1)]
+                    step += 1
+                    retry_at = time.monotonic() + delay
+                continue
             with contextlib.suppress(TimeoutError):
-                async with asyncio.timeout(remaining):
-                    await self._read_wanted.wait()
+                async with asyncio.timeout(min(waits) if waits else None):
+                    await self._wake.wait()
+
+    def _advertising(self) -> bool:
+        """Return True when the lamp was heard advertising lately: it has power.
+
+        Home Assistant keeps the time of the last advertisement it received; no
+        connection is needed. The lamp is silent while it is connected, so the end
+        of the last connection counts as well.
+        """
+        heard = [
+            info.time
+            for connectable in (True, False)
+            if (
+                info := bluetooth.async_last_service_info(
+                    self._hass, self.address, connectable=connectable
+                )
+            )
+            is not None
+        ]
+        if not heard:
+            return False  # Home Assistant has not heard it, or forgot it
+        if not self._power_check_interval:
+            return True  # Home Assistant forgets a silent lamp after some minutes
+        silence = time.monotonic() - max(*heard, self._last_contact)
+        _LOGGER.debug(
+            "Flos String Light %s last advertised %.0f s ago", self.address, silence
+        )
+        return silence <= self._power_check_interval
 
     async def _visit(self, action: Callable[[], Awaitable[None]] | None = None) -> None:
         """Connect, read the state, do one thing and disconnect.
@@ -433,7 +464,7 @@ class FlosStringBLEManager:
             finally:
                 if (client := self._client) is not None:
                     await self._disconnect(client)
-                self._last_visit = time.monotonic()
+                self._last_visit = self._last_contact = time.monotonic()
 
     @callback
     def _set_reachable(self, reachable: bool, reason: str = "") -> None:
@@ -453,7 +484,7 @@ class FlosStringBLEManager:
         if reachable:
             _LOGGER.info("Flos String Light %s is reachable", self.address)
         else:
-            self._read_wanted.set()  # the loop in _run_on_demand() takes over
+            self._wake.set()  # the loop in _run_on_demand() takes over
         self._notify()
 
     @callback
