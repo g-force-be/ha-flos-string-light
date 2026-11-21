@@ -32,9 +32,11 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
+    CONF_POWER_CHECK_INTERVAL,
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_POWER_CHECK_INTERVAL,
     DOMAIN,
     SERVICE_UUID,
 )
@@ -60,6 +62,20 @@ OPTIONS_SCHEMA = vol.Schema(
                     max=1440,
                     step=1,
                     unit_of_measurement="min",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Coerce(int),
+        ),
+        vol.Required(
+            CONF_POWER_CHECK_INTERVAL, default=DEFAULT_POWER_CHECK_INTERVAL
+        ): vol.All(
+            NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=3600,
+                    step=1,
+                    unit_of_measurement="s",
                     mode=NumberSelectorMode.BOX,
                 )
             ),

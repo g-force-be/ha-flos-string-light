@@ -12,9 +12,11 @@ from .ble import FlosStringBLEManager
 from .const import (
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
+    CONF_POWER_CHECK_INTERVAL,
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_POWER_CHECK_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +39,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
         == CONNECTION_ON_DEMAND,
         # Minutes in the options, seconds in the manager.
         poll_interval=options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL) * 60,
+        power_check_interval=options.get(
+            CONF_POWER_CHECK_INTERVAL, DEFAULT_POWER_CHECK_INTERVAL
+        ),
     )
     entry.runtime_data = manager
     # Connects in the background: the setup must not wait for, or fail on, a lamp

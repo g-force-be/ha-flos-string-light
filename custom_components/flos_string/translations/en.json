@@ -31,11 +31,13 @@
         "description": "Lamps on the same Bluetooth proxy must all connect the same way.",
         "data": {
           "connection": "Connection",
-          "poll_interval": "Poll interval"
+          "poll_interval": "Poll interval",
+          "power_check_interval": "Power check interval"
         },
         "data_description": {
           "connection": "Stay connected: the lamp reports every change at once. Connect only when needed: Home Assistant connects for a change or a read and disconnects again, one lamp at a time.",
-          "poll_interval": "Only when connecting when needed: minutes between two reads of the lamp's state. 0 never reads it; the state is then what Home Assistant last set."
+          "poll_interval": "Only when connecting when needed: minutes between two reads of the lamp's brightness, each over a short connection. 0 never reads it; the state is then what Home Assistant last set.",
+          "power_check_interval": "Only when connecting when needed: seconds between two checks that the lamp still advertises, without a connection. A lamp that was not heard since the previous check has no power and turns unavailable. 0 leaves this to Home Assistant, which takes a few minutes."
         }
       }
     }

@@ -30,3 +30,7 @@ CONNECTION_ALWAYS = "always"  # one connection, kept open
 CONNECTION_ON_DEMAND = "on_demand"  # connect for a change or a read, then disconnect
 CONF_POLL_INTERVAL = "poll_interval"  # minutes between reads on demand; 0 is never
 DEFAULT_POLL_INTERVAL = 5
+# Seconds between checks, on demand, that the lamp still advertises: no connection.
+# 0 leaves it to Home Assistant, which takes some minutes to miss a lamp.
+CONF_POWER_CHECK_INTERVAL = "power_check_interval"
+DEFAULT_POWER_CHECK_INTERVAL = 60
