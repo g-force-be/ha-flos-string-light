@@ -30,6 +30,13 @@ CONNECTION_ALWAYS = "always"  # one connection, kept open
 CONNECTION_ON_DEMAND = "on_demand"  # connect for a change or a read, then disconnect
 CONF_POLL_INTERVAL = "poll_interval"  # minutes between reads on demand; 0 is never
 DEFAULT_POLL_INTERVAL = 5
+# On demand: at most VISIT_LIMIT visits (connect, read or change, disconnect) to
+# one lamp per VISIT_WINDOW seconds; the next one waits. A lamp that is visited
+# too often in a short time stops advertising until its power is cut: seen on
+# 21/11/2026 after 6 changes in 20 seconds. Where the limit lies is not known.
+VISIT_LIMIT = 3
+VISIT_WINDOW = 30
+
 # Seconds between checks, on demand, that the lamp still advertises: no connection.
 # 0 leaves it to Home Assistant, which takes some minutes to miss a lamp.
 CONF_POWER_CHECK_INTERVAL = "power_check_interval"

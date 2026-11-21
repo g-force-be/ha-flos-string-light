@@ -18,6 +18,9 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
   state: at the start, every poll interval and when the lamp advertises again.
 - Only the last brightness asked for is written: one that still waits, for
   its turn or for the lamp to connect, is replaced by the next.
+- At most VISIT_LIMIT visits to one lamp per VISIT_WINDOW; the next one waits.
+  A lamp that is visited too often in a short time stops advertising until
+  its power is cut.
 - All lamps that connect on demand take turns, so that no two are connected at
   once. A connection made while the Bluetooth proxy holds another lamp reaches a
   lamp that reads a brightness back without carrying it out.
@@ -58,6 +61,8 @@ from .const import (
     NAME_READBACK_INTERVAL,
     RECONNECT_BACKOFF,
     REFRESH_INTERVAL,
+    VISIT_LIMIT,
+    VISIT_WINDOW,
     STABLE_CONNECTION,
 )
 from .util import clean_name
@@ -109,6 +114,8 @@ class FlosStringBLEManager:
         self._last_visit = 0.0
         self._last_contact = 0.0
         self._wake = asyncio.Event()
+        # On demand: when the last visits were let through, for the limit.
+        self._visits: list[float] = []
         # On demand: the Bluetooth adapter or proxy that hears the lamp best, and
         # its signal in dBm; None when none hears it.
         self.proxy: str | None = None
@@ -478,6 +485,7 @@ class FlosStringBLEManager:
         while the Bluetooth proxy holds another lamp reaches a lamp that reads a
         brightness back without carrying it out.
         """
+        await self._wait_for_room()
         async with self._hass.data.setdefault(DATA_TURN, asyncio.Lock()):
             if self._stopped:
                 raise HomeAssistantError(
@@ -501,6 +509,24 @@ class FlosStringBLEManager:
                 if (client := self._client) is not None:
                     await self._disconnect(client)
                 self._last_visit = self._last_contact = time.monotonic()
+
+    async def _wait_for_room(self) -> None:
+        """Wait until one more visit fits in VISIT_LIMIT per VISIT_WINDOW."""
+        while True:
+            now = time.monotonic()
+            self._visits = [t for t in self._visits if now - t < VISIT_WINDOW]
+            if len(self._visits) < VISIT_LIMIT:
+                break
+            delay = self._visits[0] + VISIT_WINDOW - now
+            _LOGGER.debug(
+                "%d visits to %s in the last %d s: the next one waits %.1f s",
+                len(self._visits),
+                self.address,
+                VISIT_WINDOW,
+                delay,
+            )
+            await asyncio.sleep(delay)
+        self._visits.append(now)
 
     @callback
     def _set_reachable(self, reachable: bool, reason: str = "") -> None:
