@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
 from homeassistant.core import callback
+from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import Entity
 
 from . import FlosStringConfigEntry
@@ -31,6 +32,8 @@ class FlosStringEntity(Entity):
         self._attr_unique_id = address.upper().replace(":", "")
         self._attr_device_info = {
             "identifiers": {(DOMAIN, address.upper())},
+            # Shown on the device page as the lamp's Bluetooth address.
+            "connections": {(CONNECTION_BLUETOOTH, address.upper())},
             # Entries made before the names were cleaned still hold the lamp's
             # NUL padding.
             "name": clean_name(entry.data.get(CONF_NAME))
