@@ -47,15 +47,16 @@ What the open connection costs:
 Each lamp has two settings, under *Settings → Devices & services → Flos String Light → Configure* (the gear next to the lamp):
 
 - **Connection:** *Stay connected* (the default, described above) or *Connect only when needed*.
-- **Poll interval**, in minutes. Only used with *Connect only when needed*.
+- **Poll interval**, in minutes: how often the brightness is read, over a short connection. Only used with *Connect only when needed*.
+- **Power check interval**, in seconds: how often Home Assistant checks that the lamp still advertises, without a connection. Only used with *Connect only when needed*.
 
 With *Connect only when needed*:
 
 - **A change connects, writes, reads the result back and disconnects.** That takes a few seconds.
 - **Lamps take turns.** No two lamps are connected at the same moment, so the problem with two lamps on one proxy doesn't occur. Set all lamps on the same proxy to *Connect only when needed*: a lamp that stays connected spoils it for the others.
 - **The state is read when Home Assistant starts, every poll interval and when the lamp advertises again.** With a poll interval of 0 it is never read in between; the state is then what Home Assistant last set. A change made with the Flos app or the dimmer on the cord shows up at the next read.
-- **A lamp that stops advertising has no power.** A lamp that isn't connected advertises. When Home Assistant no longer sees it, the lamp turns *unavailable* and nothing connects to it until it advertises again. Home Assistant needs a few minutes to notice that a lamp has gone silent.
-- **The Flos app can connect**, except during the seconds of a change or a read.
+- **A lamp that stops advertising has no power.** A lamp that isn't connected advertises, and Home Assistant hears that without connecting. Every power check interval (60 seconds by default) the integration looks at when the lamp was last heard. A lamp that wasn't heard since the previous check turns *unavailable*, and nothing connects to it until it advertises again; then its state is read at once. With an interval of 0 the integration waits for Home Assistant itself to miss the lamp, which takes a few minutes.
+- **The Flos app can connect**, except during the seconds of a change or a read. While the app is connected the lamp doesn't advertise, so Home Assistant shows it as *unavailable*.
 
 ## The lamp's name
 
