@@ -10,7 +10,8 @@ One connection per lamp, open for as long as the config entry is loaded:
 - The lamp's name is read on every connection, and can be written.
 - When the connection drops, the lamp is unavailable at once and a background task
   reconnects: after 5, 10 and 30 seconds, then every minute, and sooner when the
-  lamp is seen advertising again.
+  lamp is seen advertising again. The first wait is an option of the lamp, and
+  the others follow it.
 
 Or, as an option per lamp, a connection only when it is needed ("on demand"):
 
@@ -53,8 +54,9 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from .const import (
     BRIGHTNESS_CHAR_UUID,
-    CONNECT_ATTEMPTS,
+    DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TWICE,
+    DEFAULT_RETRY_INTERVAL,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
     DEVICE_NAME_CHAR_UUID,
@@ -63,8 +65,8 @@ from .const import (
     NAME_LENGTH,
     NAME_READBACK_ATTEMPTS,
     NAME_READBACK_INTERVAL,
-    RECONNECT_BACKOFF,
     REFRESH_INTERVAL,
+    RETRY_STEPS,
     STABLE_CONNECTION,
 )
 from .util import clean_name
@@ -96,6 +98,8 @@ class FlosStringBLEManager:
         poll_interval: float = REFRESH_INTERVAL,
         power_check_interval: float = 0,
         connect_twice: bool = DEFAULT_CONNECT_TWICE,
+        connect_attempts: int = DEFAULT_CONNECT_ATTEMPTS,
+        retry_interval: float = DEFAULT_RETRY_INTERVAL,
         visit_limit: int = DEFAULT_VISIT_LIMIT,
         visit_window: float = DEFAULT_VISIT_WINDOW,
     ) -> None:
@@ -107,6 +111,9 @@ class FlosStringBLEManager:
         still advertises; 0 leaves it to Home Assistant, which takes minutes.
         connect_twice: open every connection, close it and open it again
         before use.
+        connect_attempts: tries within one connection attempt.
+        retry_interval: seconds until the next attempt after a connection that
+        failed; the attempts after that follow after RETRY_STEPS times as long.
         visit_limit: on demand, the most visits per visit_window seconds; the
         next one waits. 0 is no limit.
         """
@@ -116,6 +123,10 @@ class FlosStringBLEManager:
         self._poll_interval = poll_interval
         self._power_check_interval = power_check_interval
         self._connect_twice = connect_twice
+        self._connect_attempts = connect_attempts
+        # The waits between attempts after a connection that failed; the last
+        # one repeats.
+        self._backoff = tuple(retry_interval * step for step in RETRY_STEPS)
         self._visit_limit = visit_limit
         self._visit_window = visit_window
         # On demand: True once the state is read; False after a connection that
@@ -242,7 +253,7 @@ class FlosStringBLEManager:
 
     async def _run(self) -> None:
         """Connect, stay connected and reconnect until the task is cancelled."""
-        step = 0  # position in RECONNECT_BACKOFF since the last stable connection
+        step = 0  # position in self._backoff since the last stable connection
         while True:
             self._advertised.clear()
             try:
@@ -268,7 +279,7 @@ class FlosStringBLEManager:
                     continue
                 if time.monotonic() - connected_at >= STABLE_CONNECTION:
                     step = 0
-            delay = RECONNECT_BACKOFF[min(step, len(RECONNECT_BACKOFF) - 1)]
+            delay = self._backoff[min(step, len(self._backoff) - 1)]
             step += 1
             await self._wait_before_retry(delay)
 
@@ -278,7 +289,7 @@ class FlosStringBLEManager:
         Never less than the first backoff step: a lamp that advertises but refuses
         the connection must not be retried in a tight loop.
         """
-        floor = RECONNECT_BACKOFF[0]
+        floor = self._backoff[0]
         await asyncio.sleep(floor)
         if delay > floor:
             with contextlib.suppress(TimeoutError):
@@ -343,7 +354,7 @@ class FlosStringBLEManager:
             ble_device,
             self.address,
             disconnected_callback=self._on_disconnected,
-            max_attempts=CONNECT_ATTEMPTS,
+            max_attempts=self._connect_attempts,
             # Between attempts the lamp may have become reachable over another path.
             ble_device_callback=lambda: (
                 bluetooth.async_ble_device_from_address(
@@ -410,7 +421,7 @@ class FlosStringBLEManager:
 
         In between, check every power check interval that the lamp still advertises.
         """
-        step = 0  # position in RECONNECT_BACKOFF since the lamp was last reached
+        step = 0  # position in self._backoff since the lamp was last reached
         retry_at = 0.0  # after a connection that failed: no new one before this
         while True:
             self._wake.clear()
@@ -440,7 +451,7 @@ class FlosStringBLEManager:
                 if self._reachable:
                     step = 0
                 else:
-                    delay = RECONNECT_BACKOFF[min(step, len(RECONNECT_BACKOFF) - 1)]
+                    delay = self._backoff[min(step, len(self._backoff) - 1)]
                     step += 1
                     retry_at = time.monotonic() + delay
                 continue

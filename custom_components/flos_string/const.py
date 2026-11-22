@@ -19,8 +19,6 @@ NAME_READBACK_INTERVAL = 0.5
 DEFAULT_BRIGHTNESS_PCT = 100
 
 # The connection stays open. All times in seconds.
-CONNECT_ATTEMPTS = 2  # tries within one connection attempt, before the backoff
-RECONNECT_BACKOFF = (5, 10, 30, 60)  # waits between attempts; the last one repeats
 STABLE_CONNECTION = 60  # a connection that lasted this long resets the backoff
 REFRESH_INTERVAL = 300  # safety-net read of the brightness over the open connection
 
@@ -49,3 +47,14 @@ DEFAULT_POWER_CHECK_INTERVAL = 60
 # in ble.py). Off saves the time of one connection.
 CONF_CONNECT_TWICE = "connect_twice"
 DEFAULT_CONNECT_TWICE = True
+
+# Tries within one connection attempt, before the wait for the next attempt.
+CONF_CONNECT_ATTEMPTS = "connect_attempts"
+DEFAULT_CONNECT_ATTEMPTS = 2
+
+# Seconds until the next attempt after a connection that failed. The attempts
+# after that follow after RETRY_STEPS times as long; the last step repeats.
+# With 5 seconds: 5, 10 and 30 seconds, then every minute.
+CONF_RETRY_INTERVAL = "retry_interval"
+DEFAULT_RETRY_INTERVAL = 5
+RETRY_STEPS = (1, 2, 6, 12)
