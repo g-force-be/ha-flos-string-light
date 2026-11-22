@@ -32,7 +32,8 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
   option of the lamp: one that has a proxy of its own need not wait.
 - A lamp that is not connected advertises. One that stops advertising has no
   power: it is unavailable, and nothing connects to it until it advertises again.
-  That is checked every power check interval, without a connection.
+  That is checked every power check interval, without a connection, and not
+  during a visit: a lamp that is connected is silent.
 - At the same moments the manager notes which Bluetooth proxy hears the lamp
   best and how well: the path Home Assistant takes for the next connection.
 """
@@ -507,10 +508,11 @@ class FlosStringBLEManager:
 
         Home Assistant keeps the time of the last advertisement it received; no
         connection is needed. The lamp is silent while it is connected, so the end
-        of the last connection counts as well, and a lamp whose connection is
-        kept open has power.
+        of the last connection counts as well. A lamp whose connection is kept
+        open has power. During a visit the lamp is silent too, for as long as
+        the visit takes: the visit itself finds out if it cannot be reached.
         """
-        if self._kept:
+        if self._kept or self._visiting.locked():
             return True
         heard = [
             info.time
