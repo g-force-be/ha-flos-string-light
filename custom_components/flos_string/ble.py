@@ -28,7 +28,8 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
   its power is cut.
 - All lamps that connect on demand take turns, so that no two are connected at
   once. A connection made while the Bluetooth proxy holds another lamp reaches a
-  lamp that reads a brightness back without carrying it out.
+  lamp that reads a brightness back without carrying it out. Taking turns is an
+  option of the lamp: one that has a proxy of its own need not wait.
 - A lamp that is not connected advertises. One that stops advertising has no
   power: it is unavailable, and nothing connects to it until it advertises again.
   That is checked every power check interval, without a connection.
@@ -62,6 +63,7 @@ from .const import (
     DEFAULT_CONNECT_TWICE,
     DEFAULT_HOLD_TIME,
     DEFAULT_RETRY_INTERVAL,
+    DEFAULT_TAKE_TURNS,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
     DEVICE_NAME_CHAR_UUID,
@@ -124,6 +126,7 @@ class FlosStringBLEManager:
         retry_interval: float = DEFAULT_RETRY_INTERVAL,
         visit_limit: int = DEFAULT_VISIT_LIMIT,
         visit_window: float = DEFAULT_VISIT_WINDOW,
+        take_turns: bool = DEFAULT_TAKE_TURNS,
     ) -> None:
         """Initialize the manager; async_start() opens the connection.
 
@@ -140,6 +143,7 @@ class FlosStringBLEManager:
         failed; the attempts after that follow after RETRY_STEPS times as long.
         visit_limit: on demand, the most visits per visit_window seconds; the
         next one waits. 0 is no limit.
+        take_turns: on demand, wait until no other lamp is connected.
         """
         self._hass = hass
         self.address = address
@@ -154,6 +158,7 @@ class FlosStringBLEManager:
         self._backoff = tuple(retry_interval * step for step in RETRY_STEPS)
         self._visit_limit = visit_limit
         self._visit_window = visit_window
+        self._take_turns = take_turns
         # On demand: True once the state is read; False after a connection that
         # failed and when the lamp stops advertising.
         self._reachable = False
@@ -568,7 +573,8 @@ class FlosStringBLEManager:
 
         All lamps share one turn for this, so they take turns: a connection made
         while the Bluetooth proxy holds another lamp reaches a lamp that reads a
-        brightness back without carrying it out.
+        brightness back without carrying it out. A lamp that does not take turns
+        only waits for its own visits.
 
         keep: leave the connection open for the hold time, and keep the turn
         with it. The next visit within that time goes over that connection.
@@ -617,6 +623,8 @@ class FlosStringBLEManager:
 
     async def _take_turn(self) -> None:
         """Wait for the turn; a lamp that only keeps its connection open gives way."""
+        if not self._take_turns:
+            return
         turn = self._turn
         if (keeper := turn.keeper) is not None:
             _LOGGER.debug("%s gives way to %s", keeper.address, self.address)
@@ -630,6 +638,8 @@ class FlosStringBLEManager:
     @callback
     def _give_turn(self) -> None:
         """Give the turn to the next lamp that waits for it."""
+        if not self._take_turns:
+            return
         turn = self._turn
         if turn.keeper is self:
             turn.keeper = None
@@ -687,7 +697,7 @@ class FlosStringBLEManager:
             or self._entry is None
             or self._client is None
             or not self._ready
-            or turn.waiting
+            or (self._take_turns and turn.waiting)
         ):
             return False
         self._kept = True
@@ -695,7 +705,8 @@ class FlosStringBLEManager:
         self._last_visit = now
         self._keep_until = now + self._hold_time
         self._let_go.clear()
-        turn.keeper = self
+        if self._take_turns:
+            turn.keeper = self
         self._keeper = self._entry.async_create_background_task(
             self._hass, self._keep(), f"{DOMAIN} keep {self.address}"
         )

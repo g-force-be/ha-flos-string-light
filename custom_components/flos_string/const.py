@@ -47,6 +47,11 @@ DEFAULT_VISIT_LIMIT = 3
 CONF_VISIT_WINDOW = "visit_window"
 DEFAULT_VISIT_WINDOW = 30
 
+# On demand: wait until no other lamp is connected. Needed for lamps on the same
+# Bluetooth proxy; a lamp with a proxy of its own need not wait.
+CONF_TAKE_TURNS = "take_turns"
+DEFAULT_TAKE_TURNS = True
+
 # Seconds between checks, on demand, that the lamp still advertises: no connection.
 # 0 leaves it to Home Assistant, which takes some minutes to miss a lamp.
 CONF_POWER_CHECK_INTERVAL = "power_check_interval"

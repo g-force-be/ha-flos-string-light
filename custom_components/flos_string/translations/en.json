@@ -36,6 +36,7 @@
           "hold_time": "Keep the connection open",
           "visit_limit": "Limit: visits",
           "visit_window": "Limit: window",
+          "take_turns": "One lamp at a time",
           "connect_twice": "Make every connection twice",
           "connect_attempts": "Connection attempts",
           "retry_interval": "Retry interval"
@@ -47,6 +48,7 @@
           "hold_time": "Only when connecting when needed: seconds the connection stays open after a change. The next change within that time is written at once, without a new connection, and starts the time again. The connection closes sooner when another lamp needs its turn. While it is open the Flos app can't connect. 0 closes the connection right after the change.",
           "visit_limit": "Only when connecting when needed: the most visits to the lamp, each a connection for a change or a read, within the window below. The next one waits. A lamp that is connected to too often in a short time stops advertising until its power is cut. 0 sets no limit.",
           "visit_window": "Only when connecting when needed: the length in seconds of the window that the limit counts in.",
+          "take_turns": "Only when connecting when needed: wait until no other lamp is connected. Needed for lamps on the same Bluetooth proxy: a connection made while the proxy holds another lamp reaches a lamp that doesn't carry out what it is told. Turn it off only for a lamp that has a Bluetooth proxy of its own.",
           "connect_twice": "Open every connection, close it and open it again before use. A connection that has to look up the lamp's services, after a restart of Home Assistant or of the Bluetooth proxy, reaches a lamp that doesn't carry out what it is told, or stalls; the second connection doesn't have to look them up. Off saves a second or more per connection.",
           "connect_attempts": "How many times in a row Home Assistant tries to connect before it gives up for this time.",
           "retry_interval": "Seconds until the next attempt after a connection that failed. Until it succeeds the lamp is unavailable. The attempts after that follow after 2, 6 and 12 times as long."

@@ -17,6 +17,7 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
     CONF_RETRY_INTERVAL,
+    CONF_TAKE_TURNS,
     CONF_VISIT_LIMIT,
     CONF_VISIT_WINDOW,
     CONNECTION_ALWAYS,
@@ -27,6 +28,7 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
+    DEFAULT_TAKE_TURNS,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
 )
@@ -57,6 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
         hold_time=options.get(CONF_HOLD_TIME, DEFAULT_HOLD_TIME),
         visit_limit=options.get(CONF_VISIT_LIMIT, DEFAULT_VISIT_LIMIT),
         visit_window=options.get(CONF_VISIT_WINDOW, DEFAULT_VISIT_WINDOW),
+        take_turns=options.get(CONF_TAKE_TURNS, DEFAULT_TAKE_TURNS),
         connect_twice=options.get(CONF_CONNECT_TWICE, DEFAULT_CONNECT_TWICE),
         connect_attempts=options.get(
             CONF_CONNECT_ATTEMPTS, DEFAULT_CONNECT_ATTEMPTS

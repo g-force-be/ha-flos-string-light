@@ -38,6 +38,7 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
     CONF_RETRY_INTERVAL,
+    CONF_TAKE_TURNS,
     CONF_VISIT_LIMIT,
     CONF_VISIT_WINDOW,
     CONNECTION_ALWAYS,
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
+    DEFAULT_TAKE_TURNS,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
     DOMAIN,
@@ -94,6 +96,7 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Required(
             CONF_VISIT_WINDOW, default=DEFAULT_VISIT_WINDOW
         ): _whole_number(1, 3600, "s"),
+        vol.Required(CONF_TAKE_TURNS, default=DEFAULT_TAKE_TURNS): BooleanSelector(),
         vol.Required(
             CONF_CONNECT_TWICE, default=DEFAULT_CONNECT_TWICE
         ): BooleanSelector(),
