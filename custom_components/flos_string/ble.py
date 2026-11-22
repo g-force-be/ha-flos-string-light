@@ -18,7 +18,8 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
   state: at the start, every poll interval and when the lamp advertises again.
 - Only the last brightness asked for is written: one that still waits, for
   its turn or for the lamp to connect, is replaced by the next.
-- At most VISIT_LIMIT visits to one lamp per VISIT_WINDOW; the next one waits.
+- At most so many visits to one lamp per window of time, 3 per 30 seconds
+  unless the lamp's options say otherwise; the next one waits.
   A lamp that is visited too often in a short time stops advertising until
   its power is cut.
 - All lamps that connect on demand take turns, so that no two are connected at
@@ -54,6 +55,8 @@ from .const import (
     BRIGHTNESS_CHAR_UUID,
     CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TWICE,
+    DEFAULT_VISIT_LIMIT,
+    DEFAULT_VISIT_WINDOW,
     DEVICE_NAME_CHAR_UUID,
     DOMAIN,
     NAME_CHAR_UUID,
@@ -62,8 +65,6 @@ from .const import (
     NAME_READBACK_INTERVAL,
     RECONNECT_BACKOFF,
     REFRESH_INTERVAL,
-    VISIT_LIMIT,
-    VISIT_WINDOW,
     STABLE_CONNECTION,
 )
 from .util import clean_name
@@ -95,6 +96,8 @@ class FlosStringBLEManager:
         poll_interval: float = REFRESH_INTERVAL,
         power_check_interval: float = 0,
         connect_twice: bool = DEFAULT_CONNECT_TWICE,
+        visit_limit: int = DEFAULT_VISIT_LIMIT,
+        visit_window: float = DEFAULT_VISIT_WINDOW,
     ) -> None:
         """Initialize the manager; async_start() opens the connection.
 
@@ -104,6 +107,8 @@ class FlosStringBLEManager:
         still advertises; 0 leaves it to Home Assistant, which takes minutes.
         connect_twice: open every connection, close it and open it again
         before use.
+        visit_limit: on demand, the most visits per visit_window seconds; the
+        next one waits. 0 is no limit.
         """
         self._hass = hass
         self.address = address
@@ -111,6 +116,8 @@ class FlosStringBLEManager:
         self._poll_interval = poll_interval
         self._power_check_interval = power_check_interval
         self._connect_twice = connect_twice
+        self._visit_limit = visit_limit
+        self._visit_window = visit_window
         # On demand: True once the state is read; False after a connection that
         # failed and when the lamp stops advertising.
         self._reachable = False
@@ -526,18 +533,22 @@ class FlosStringBLEManager:
                 self._last_visit = self._last_contact = time.monotonic()
 
     async def _wait_for_room(self) -> None:
-        """Wait until one more visit fits in VISIT_LIMIT per VISIT_WINDOW."""
+        """Wait until one more visit fits in the limit per window; 0 is no limit."""
+        if not self._visit_limit:
+            return
         while True:
             now = time.monotonic()
-            self._visits = [t for t in self._visits if now - t < VISIT_WINDOW]
-            if len(self._visits) < VISIT_LIMIT:
+            self._visits = [
+                t for t in self._visits if now - t < self._visit_window
+            ]
+            if len(self._visits) < self._visit_limit:
                 break
-            delay = self._visits[0] + VISIT_WINDOW - now
+            delay = self._visits[0] + self._visit_window - now
             _LOGGER.debug(
                 "%d visits to %s in the last %d s: the next one waits %.1f s",
                 len(self._visits),
                 self.address,
-                VISIT_WINDOW,
+                self._visit_window,
                 delay,
             )
             await asyncio.sleep(delay)

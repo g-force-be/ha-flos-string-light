@@ -14,11 +14,15 @@ from .const import (
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
+    CONF_VISIT_LIMIT,
+    CONF_VISIT_WINDOW,
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_TWICE,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
+    DEFAULT_VISIT_LIMIT,
+    DEFAULT_VISIT_WINDOW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,6 +48,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
         power_check_interval=options.get(
             CONF_POWER_CHECK_INTERVAL, DEFAULT_POWER_CHECK_INTERVAL
         ),
+        visit_limit=options.get(CONF_VISIT_LIMIT, DEFAULT_VISIT_LIMIT),
+        visit_window=options.get(CONF_VISIT_WINDOW, DEFAULT_VISIT_WINDOW),
         connect_twice=options.get(CONF_CONNECT_TWICE, DEFAULT_CONNECT_TWICE),
     )
     entry.runtime_data = manager

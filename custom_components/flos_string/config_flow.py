@@ -35,11 +35,15 @@ from .const import (
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
+    CONF_VISIT_LIMIT,
+    CONF_VISIT_WINDOW,
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_TWICE,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
+    DEFAULT_VISIT_LIMIT,
+    DEFAULT_VISIT_WINDOW,
     DOMAIN,
     SERVICE_UUID,
 )
@@ -48,6 +52,17 @@ from .util import clean_name
 _LOGGER = logging.getLogger(__name__)
 
 MAC_REGEX = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+
+
+def _whole_number(low: int, high: int, unit: str | None = None) -> vol.All:
+    """A whole number between low and high, typed in a box."""
+    config = NumberSelectorConfig(
+        min=low, max=high, step=1, mode=NumberSelectorMode.BOX
+    )
+    if unit is not None:
+        config["unit_of_measurement"] = unit
+    return vol.All(NumberSelector(config), vol.Coerce(int))
+
 
 OPTIONS_SCHEMA = vol.Schema(
     {
@@ -58,32 +73,18 @@ OPTIONS_SCHEMA = vol.Schema(
                 mode=SelectSelectorMode.LIST,
             )
         ),
-        vol.Required(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): vol.All(
-            NumberSelector(
-                NumberSelectorConfig(
-                    min=0,
-                    max=1440,
-                    step=1,
-                    unit_of_measurement="min",
-                    mode=NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Coerce(int),
-        ),
+        vol.Required(
+            CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL
+        ): _whole_number(0, 1440, "min"),
         vol.Required(
             CONF_POWER_CHECK_INTERVAL, default=DEFAULT_POWER_CHECK_INTERVAL
-        ): vol.All(
-            NumberSelector(
-                NumberSelectorConfig(
-                    min=0,
-                    max=3600,
-                    step=1,
-                    unit_of_measurement="s",
-                    mode=NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Coerce(int),
-        ),
+        ): _whole_number(0, 3600, "s"),
+        vol.Required(
+            CONF_VISIT_LIMIT, default=DEFAULT_VISIT_LIMIT
+        ): _whole_number(0, 100),
+        vol.Required(
+            CONF_VISIT_WINDOW, default=DEFAULT_VISIT_WINDOW
+        ): _whole_number(1, 3600, "s"),
         vol.Required(
             CONF_CONNECT_TWICE, default=DEFAULT_CONNECT_TWICE
         ): BooleanSelector(),
