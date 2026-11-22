@@ -33,6 +33,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_CONNECT_ATTEMPTS,
     CONF_CONNECT_TWICE,
+    CONF_HOLD_TIME,
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
@@ -43,6 +44,7 @@ from .const import (
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TWICE,
+    DEFAULT_HOLD_TIME,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
@@ -83,6 +85,9 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Required(
             CONF_POWER_CHECK_INTERVAL, default=DEFAULT_POWER_CHECK_INTERVAL
         ): _whole_number(0, 3600, "s"),
+        vol.Required(CONF_HOLD_TIME, default=DEFAULT_HOLD_TIME): _whole_number(
+            0, 3600, "s"
+        ),
         vol.Required(
             CONF_VISIT_LIMIT, default=DEFAULT_VISIT_LIMIT
         ): _whole_number(0, 100),

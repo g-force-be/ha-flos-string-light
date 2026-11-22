@@ -28,6 +28,15 @@ CONNECTION_ALWAYS = "always"  # one connection, kept open
 CONNECTION_ON_DEMAND = "on_demand"  # connect for a change or a read, then disconnect
 CONF_POLL_INTERVAL = "poll_interval"  # minutes between reads on demand; 0 is never
 DEFAULT_POLL_INTERVAL = 5
+# On demand: seconds the connection stays open after a change. The next change
+# within that time is written at once, over that connection. 0 closes it at
+# once.
+CONF_HOLD_TIME = "hold_time"
+DEFAULT_HOLD_TIME = 0
+# Home Assistant forgets a lamp that is silent for minutes, as one is whose
+# connection is kept open. After a connection the lamp advertises again: it
+# gets this many seconds before it is taken for a lamp without power.
+ADVERTISE_AGAIN = 10
 # On demand: at most so many visits (connect, read or change, disconnect) to one
 # lamp per window of so many seconds; the next one waits. 0 visits is no limit.
 # A lamp that is visited too often in a short time stops advertising until its

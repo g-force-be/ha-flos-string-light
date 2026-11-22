@@ -19,6 +19,9 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
   state: at the start, every poll interval and when the lamp advertises again.
 - Only the last brightness asked for is written: one that still waits, for
   its turn or for the lamp to connect, is replaced by the next.
+- After a change the connection can stay open for a while (the hold time, an
+  option of the lamp): the next change within that time is written at once,
+  over that connection. It closes as soon as another lamp wants its turn.
 - At most so many visits to one lamp per window of time, 3 per 30 seconds
   unless the lamp's options say otherwise; the next one waits.
   A lamp that is visited too often in a short time stops advertising until
@@ -53,9 +56,11 @@ from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from .const import (
+    ADVERTISE_AGAIN,
     BRIGHTNESS_CHAR_UUID,
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TWICE,
+    DEFAULT_HOLD_TIME,
     DEFAULT_RETRY_INTERVAL,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
@@ -76,8 +81,24 @@ _LOGGER = logging.getLogger(__name__)
 # What a Bluetooth operation raises when the lamp or the adapter lets go.
 BLE_ERRORS = (BleakError, TimeoutError, OSError, EOFError)
 
-# Key in hass.data of the lock that the lamps connecting on demand share.
+# Key in hass.data of the turn that the lamps connecting on demand share.
 DATA_TURN = f"{DOMAIN}_turn"
+
+
+class _Turn:
+    """The turn that the lamps connecting on demand share: one lamp at a time.
+
+    A lamp that keeps its connection open after a change keeps the turn too,
+    and gives way to the next lamp that wants it.
+    """
+
+    def __init__(self) -> None:
+        """Nobody has the turn."""
+        self.lock = asyncio.Lock()
+        # The lamp that has the turn only to keep its connection open, if any.
+        self.keeper: FlosStringBLEManager | None = None
+        # How many lamps wait for the turn right now.
+        self.waiting = 0
 
 
 def _describe(value: bytes) -> str:
@@ -97,6 +118,7 @@ class FlosStringBLEManager:
         on_demand: bool = False,
         poll_interval: float = REFRESH_INTERVAL,
         power_check_interval: float = 0,
+        hold_time: float = DEFAULT_HOLD_TIME,
         connect_twice: bool = DEFAULT_CONNECT_TWICE,
         connect_attempts: int = DEFAULT_CONNECT_ATTEMPTS,
         retry_interval: float = DEFAULT_RETRY_INTERVAL,
@@ -109,6 +131,8 @@ class FlosStringBLEManager:
         poll_interval: seconds between reads on demand; 0 is never.
         power_check_interval: seconds between checks, on demand, that the lamp
         still advertises; 0 leaves it to Home Assistant, which takes minutes.
+        hold_time: on demand, seconds the connection stays open after a change;
+        0 closes it at once.
         connect_twice: open every connection, close it and open it again
         before use.
         connect_attempts: tries within one connection attempt.
@@ -122,6 +146,7 @@ class FlosStringBLEManager:
         self.on_demand = on_demand
         self._poll_interval = poll_interval
         self._power_check_interval = power_check_interval
+        self._hold_time = hold_time
         self._connect_twice = connect_twice
         self._connect_attempts = connect_attempts
         # The waits between attempts after a connection that failed; the last
@@ -135,10 +160,18 @@ class FlosStringBLEManager:
         # On demand: when the last connection attempt ended, and when the last
         # connection that was made ended; set when the loop has to look again.
         self._last_visit = 0.0
-        self._last_contact = 0.0
+        self._last_contact = float("-inf")  # no connection yet
         self._wake = asyncio.Event()
         # On demand: when the last visits were let through, for the limit.
         self._visits: list[float] = []
+        # On demand: one visit to this lamp at a time.
+        self._visiting = asyncio.Lock()
+        # On demand: True while the connection of the last change is kept open,
+        # until when, the task that closes it, and the sign for it to close now.
+        self._kept = False
+        self._keep_until = 0.0
+        self._keeper: asyncio.Task[None] | None = None
+        self._let_go = asyncio.Event()
         # On demand: the Bluetooth adapter or proxy that hears the lamp best, and
         # its signal in dBm; None when none hears it.
         self.proxy: str | None = None
@@ -233,6 +266,10 @@ class FlosStringBLEManager:
         if (change := self._change) is not None and not change.done():
             change.cancel()
             await asyncio.wait([change])
+        if self._kept:
+            async with self._visiting:
+                if self._kept:
+                    await self._stop_keeping()
         if (client := self._client) is not None:
             await self._disconnect(client)
 
@@ -404,6 +441,7 @@ class FlosStringBLEManager:
             return  # an earlier connection, already handled
         self._client = None
         self._disconnected.set()
+        self._let_go.set()  # a connection that was kept open is gone
         if not self._ready:
             return
         self._ready = False
@@ -464,8 +502,11 @@ class FlosStringBLEManager:
 
         Home Assistant keeps the time of the last advertisement it received; no
         connection is needed. The lamp is silent while it is connected, so the end
-        of the last connection counts as well.
+        of the last connection counts as well, and a lamp whose connection is
+        kept open has power.
         """
+        if self._kept:
+            return True
         heard = [
             info.time
             for connectable in (True, False)
@@ -477,7 +518,10 @@ class FlosStringBLEManager:
             is not None
         ]
         if not heard:
-            return False  # Home Assistant has not heard it, or forgot it
+            # Home Assistant has not heard the lamp, or forgot it: no power. It
+            # also forgets a lamp whose connection is kept open for long: after
+            # a connection the lamp gets a moment to advertise again.
+            return time.monotonic() - self._last_contact <= ADVERTISE_AGAIN
         if not self._power_check_interval:
             return True  # Home Assistant forgets a silent lamp after some minutes
         silence = time.monotonic() - max(*heard, self._last_contact)
@@ -491,11 +535,14 @@ class FlosStringBLEManager:
         """Note which proxy hears the lamp best, and how well. No connection.
 
         None for a lamp that stopped advertising: Home Assistant remembers its
-        last signal for some minutes more.
+        last signal for some minutes more. A lamp whose connection is kept open
+        is silent too: its last values stay.
 
         Home Assistant connects through the path with the best signal that has
         a free slot; a path that failed lately counts a little less.
         """
+        if self._kept:
+            return
         paths = (
             bluetooth.async_scanner_devices_by_address(
                 self._hass, self.address, connectable=True
@@ -511,37 +558,191 @@ class FlosStringBLEManager:
             self.proxy, self.rssi = proxy, rssi
             self._notify()
 
-    async def _visit(self, action: Callable[[], Awaitable[None]] | None = None) -> None:
+    async def _visit(
+        self,
+        action: Callable[[], Awaitable[None]] | None = None,
+        *,
+        keep: bool = False,
+    ) -> None:
         """Connect, read the state, do one thing and disconnect.
 
-        All lamps share one lock for this, so they take turns: a connection made
+        All lamps share one turn for this, so they take turns: a connection made
         while the Bluetooth proxy holds another lamp reaches a lamp that reads a
         brightness back without carrying it out.
+
+        keep: leave the connection open for the hold time, and keep the turn
+        with it. The next visit within that time goes over that connection.
         """
-        await self._wait_for_room()
-        async with self._hass.data.setdefault(DATA_TURN, asyncio.Lock()):
-            if self._stopped:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN, translation_key="not_connected"
-                )
+        async with self._visiting:
+            if self._kept and await self._use_kept(action, keep):
+                return
+            await self._wait_for_room()
+            await self._take_turn()
+            kept = False
             try:
-                await self._connect()
-            except BLE_ERRORS as err:
-                self._last_visit = time.monotonic()
-                self._set_reachable(False, str(err))
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="not_reachable",
-                    translation_placeholders={"error": str(err)},
-                ) from err
-            try:
-                self._set_reachable(True)
-                if action is not None:
-                    await action()
+                if self._stopped:
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN, translation_key="not_connected"
+                    )
+                try:
+                    await self._connect()
+                except BLE_ERRORS as err:
+                    self._last_visit = time.monotonic()
+                    self._set_reachable(False, str(err))
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="not_reachable",
+                        translation_placeholders={"error": str(err)},
+                    ) from err
+                try:
+                    self._set_reachable(True)
+                    if action is not None:
+                        await action()
+                    kept = keep and self._start_keeping()
+                finally:
+                    if not kept:
+                        if (client := self._client) is not None:
+                            await self._disconnect(client)
+                        self._last_visit = self._last_contact = time.monotonic()
             finally:
-                if (client := self._client) is not None:
-                    await self._disconnect(client)
-                self._last_visit = self._last_contact = time.monotonic()
+                if not kept:
+                    self._give_turn()
+
+    @property
+    def _turn(self) -> _Turn:
+        """The turn that all lamps connecting on demand share."""
+        if (turn := self._hass.data.get(DATA_TURN)) is None:
+            turn = self._hass.data[DATA_TURN] = _Turn()
+        return turn
+
+    async def _take_turn(self) -> None:
+        """Wait for the turn; a lamp that only keeps its connection open gives way."""
+        turn = self._turn
+        if (keeper := turn.keeper) is not None:
+            _LOGGER.debug("%s gives way to %s", keeper.address, self.address)
+            keeper._let_go.set()  # noqa: SLF001 - another lamp of this class
+        turn.waiting += 1
+        try:
+            await turn.lock.acquire()
+        finally:
+            turn.waiting -= 1
+
+    @callback
+    def _give_turn(self) -> None:
+        """Give the turn to the next lamp that waits for it."""
+        turn = self._turn
+        if turn.keeper is self:
+            turn.keeper = None
+        turn.lock.release()
+
+    async def _use_kept(
+        self, action: Callable[[], Awaitable[None]] | None, keep: bool
+    ) -> bool:
+        """Do a visit over the connection that was kept open.
+
+        False when that connection is gone, has to give way or fails a read: it
+        is closed, and the visit makes a connection of its own.
+        """
+        if (
+            self._client is None
+            or not self._ready
+            or self._stopped
+            or self._let_go.is_set()
+        ):
+            await self._stop_keeping()
+            return False
+        _LOGGER.debug("Using the connection to %s that was kept open", self.address)
+        try:
+            if action is not None:
+                await action()
+            else:
+                await self._refresh()
+        except BaseException:
+            # A fresh connection is the way back to a known state.
+            await self._stop_keeping()
+            raise
+        if self._client is None:
+            # The lamp let go meanwhile, or the read failed and closed the
+            # connection. A read is done again, over a new connection.
+            await self._stop_keeping()
+            return action is not None
+        self._set_reachable(True)
+        now = time.monotonic()
+        self._last_visit = now
+        if keep:
+            self._keep_until = now + self._hold_time
+        return True
+
+    @callback
+    def _start_keeping(self) -> bool:
+        """Keep the connection of this visit open; False when it has to close.
+
+        It has to close when no hold time is set, when the lamp let go of it
+        already and when another lamp waits for the turn.
+        """
+        turn = self._turn
+        if (
+            not self._hold_time
+            or self._stopped
+            or self._entry is None
+            or self._client is None
+            or not self._ready
+            or turn.waiting
+        ):
+            return False
+        self._kept = True
+        now = time.monotonic()
+        self._last_visit = now
+        self._keep_until = now + self._hold_time
+        self._let_go.clear()
+        turn.keeper = self
+        self._keeper = self._entry.async_create_background_task(
+            self._hass, self._keep(), f"{DOMAIN} keep {self.address}"
+        )
+        _LOGGER.debug(
+            "Keeping the connection to %s open for %s s",
+            self.address,
+            self._hold_time,
+        )
+        return True
+
+    async def _keep(self) -> None:
+        """Close the connection that is kept open, when it is time.
+
+        That is when the hold time since the last change is up, when another
+        lamp wants the turn and when the lamp let go of the connection.
+        """
+        while True:
+            left = self._keep_until - time.monotonic()
+            if left > 0 and not self._let_go.is_set():
+                with contextlib.suppress(TimeoutError):
+                    async with asyncio.timeout(left):
+                        await self._let_go.wait()
+                continue
+            async with self._visiting:
+                if self._keeper is not asyncio.current_task():
+                    return  # a visit closed it meanwhile
+                if self._keep_until > time.monotonic() and not self._let_go.is_set():
+                    continue  # a change came in at the last moment
+                await self._stop_keeping()
+                return
+
+    async def _stop_keeping(self) -> None:
+        """Close the connection that was kept open and give the turn back.
+
+        Only with self._visiting held.
+        """
+        keeper, self._keeper = self._keeper, None
+        self._kept = False
+        if keeper is not None and keeper is not asyncio.current_task():
+            keeper.cancel()
+        _LOGGER.debug("Closing the connection to %s that was kept open", self.address)
+        try:
+            if (client := self._client) is not None:
+                await self._disconnect(client)
+        finally:
+            self._last_visit = self._last_contact = time.monotonic()
+            self._give_turn()
 
     async def _wait_for_room(self) -> None:
         """Wait until one more visit fits in the limit per window; 0 is no limit."""
@@ -591,6 +792,8 @@ class FlosStringBLEManager:
         self, _service_info: bluetooth.BluetoothServiceInfoBleak
     ) -> None:
         """Home Assistant no longer sees the lamp advertise: it has no power."""
+        if self._kept:
+            return  # connected, and so silent: it has power
         self._set_reachable(False, "the lamp stopped advertising")
 
     async def async_refresh(self) -> None:
@@ -653,7 +856,7 @@ class FlosStringBLEManager:
 
         try:
             while self._wanted is not None:
-                await self._visit(write)
+                await self._visit(write, keep=True)
         finally:
             # After an error: what waited is not written later.
             self._wanted = None

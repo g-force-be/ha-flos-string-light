@@ -12,6 +12,7 @@ from .ble import FlosStringBLEManager
 from .const import (
     CONF_CONNECT_ATTEMPTS,
     CONF_CONNECT_TWICE,
+    CONF_HOLD_TIME,
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
@@ -22,6 +23,7 @@ from .const import (
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TWICE,
+    DEFAULT_HOLD_TIME,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
@@ -52,6 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
         power_check_interval=options.get(
             CONF_POWER_CHECK_INTERVAL, DEFAULT_POWER_CHECK_INTERVAL
         ),
+        hold_time=options.get(CONF_HOLD_TIME, DEFAULT_HOLD_TIME),
         visit_limit=options.get(CONF_VISIT_LIMIT, DEFAULT_VISIT_LIMIT),
         visit_window=options.get(CONF_VISIT_WINDOW, DEFAULT_VISIT_WINDOW),
         connect_twice=options.get(CONF_CONNECT_TWICE, DEFAULT_CONNECT_TWICE),
