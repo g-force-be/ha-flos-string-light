@@ -59,8 +59,11 @@ Each lamp has its own settings, under *Settings → Devices & services → Flos 
 | **Second connection** | *Always* | When a connection is closed and opened again before use: *Always*, *Only when needed* (only when it had to look up the lamp's services) or *Never*. |
 | **Connection attempts** | 2 | How many times in a row Home Assistant tries to connect before it gives up for this time. |
 | **Retry interval** | 5 s | The wait after a connection that failed. The next waits are 2, 6 and 12 times as long, and the last one repeats. |
+| **Power switch** | none | The switch that gives the lamp its power, if it has one (described below). Empty is none. |
+| **Time without power** | 5 s | How long the power stays off when the lamp is reset. |
+| **Reset after silence** | 0 s | How long a lamp may be stuck before it is reset on its own. 0 is never on its own. |
 
-The poll interval, the power check interval, the open connection, the limit and *One lamp at a time* only apply to *Connect only when needed*. The last three settings apply to both ways of connecting.
+The poll interval, the power check interval, the open connection, the limit, *One lamp at a time* and the power switch with its two times only apply to *Connect only when needed*. *Second connection*, *Connection attempts* and *Retry interval* apply to both ways of connecting.
 
 ## Connecting only when needed
 
@@ -76,6 +79,25 @@ With *Connect only when needed*:
 - **Two diagnostic sensors** show which Bluetooth proxy hears the lamp best and how strong its signal is there, in dBm. They are refreshed at every power check, without a connection, and stay available for a lamp that advertises but can't be reached: a weak signal is often why. Home Assistant picks the proxy for each connection itself: the one with the best signal that has a free slot. A lamp can't be tied to one proxy; to move a lamp to another proxy, put that proxy closer to it.
 - **The Flos app can connect**, except during the seconds of a change or a read, and for as long as the connection is kept open after a change. While the app is connected the lamp doesn't advertise, so Home Assistant shows it as *unavailable*.
 
+## A power switch
+
+A lamp can stop advertising while it has power. It is stuck then, and only cutting its power helps. Each time that was seen, the lamp fell silent right when a connection closed. With a relay in front of the lamp, Home Assistant can cut the power itself.
+
+This is optional. A lamp without a relay needs nothing and works as described above. For a lamp that has one and is set to *Connect only when needed*, choose the relay's switch under **Power switch**; a toggle helper works too. Empty the field to go without again. Then:
+
+- **A lamp that falls silent when a connection closes stays available.** It has power, so it isn't shown as *unavailable*. Nothing reads it while it is silent.
+- **The next change resets it.** The integration switches the power off, waits the *Time without power* (5 seconds by default), switches it on, waits until the lamp advertises again (up to 30 seconds) and then carries out the change. A read or the Refresh button never resets a lamp.
+- **It can also be reset on its own.** With *Reset after silence* set to a number of seconds, a lamp that was stuck that long is reset without waiting for a change, and read again. A lamp counts as stuck after 10 seconds at the soonest. A lamp that is on goes dark for the time without power.
+- **One reset, not a loop.** After a reset the power isn't cut again until the lamp was heard advertising after a connection to it closed: that shows it stands a connection again. A lamp that stays silent after its reset, or gets stuck again at once, turns *unavailable*; the Power cycle button still resets it.
+- **A button Power cycle**, under *Configuration* on the device page, resets the lamp when you ask for it, also a lamp that isn't stuck. It only works while the switch is on.
+- **While the switch is off the lamp is unavailable**, and the integration doesn't switch it on. Once the switch is on and the lamp advertises, its state is read.
+- **A switch that can't be used**, because it is unavailable or no longer exists, counts as no switch: the lamp then behaves as one without.
+- **The power is given back.** In a reset the integration asks the switch to switch on again until it says it is on, also when the switch fails or drops off the network in those seconds. Only when Home Assistant itself stops in the seconds without power does the lamp stay off; switch it on yourself then.
+
+Only a lamp that wasn't heard since a connection made by Home Assistant closed is taken for stuck. One that advertised after that and went quiet later may be held by the Flos app or be out of reach; it turns *unavailable* as before, and its power isn't cut. A lamp that was stuck already when Home Assistant started isn't recognised; use the Power cycle button for it. A lamp that is connected and reads a brightness back without carrying it out can't be recognised at all; whether a power cycle cures that isn't known yet.
+
+The times are estimates. How long the lamp needs before it advertises after its power comes on, and how short the power cut may be, haven't been measured yet.
+
 ## The lamp's name
 
 Each lamp also has a text entity **Name**, under *Configuration* on the device page. It shows the name stored in the lamp, the one it advertises over Bluetooth, and lets you change it.
@@ -89,6 +111,7 @@ Each lamp also has a text entity **Name**, under *Configuration* on the device p
 
 - Each lamp has a button **Reconnect**, under *Configuration* on the device page. It closes the connection to the lamp and opens a new one straight away. Use it when a lamp is connected but doesn't do what it is told.
 - A lamp set to *Connect only when needed* has a button **Refresh** instead. It connects, reads the lamp's state and disconnects.
+- A lamp with a power switch also has a button **Power cycle** (see *A power switch*).
 - The device page shows the lamp's Bluetooth address. The lamp offers nothing else to show: no firmware version and no serial number.
 
 ## Limitations
