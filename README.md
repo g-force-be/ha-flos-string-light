@@ -31,10 +31,10 @@ You need:
 - One light entity per lamp. Home Assistant's brightness (0–255) maps to the lamp's 0–100; 0 is off. *Turn on* without a brightness brings back the last one (100 % the first time).
 - The brightness is one byte on characteristic `335c1504-ad06-11e3-81e4-425861b86ab6` of service `0dcecf0c-ad06-11e3-81e4-425861b86ab6`.
 - **One connection per lamp, kept open.** The integration connects when Home Assistant starts and stays connected. Starting never waits for a lamp: the connection is made in the background.
-- **Every connection is made twice.** Home Assistant remembers the lamp's services, but forgets them when it restarts and when the Bluetooth proxy reconnects. On a connection that has to look them up again, the lamp accepts a brightness and reads it back but doesn't carry it out, or the connection stalls. The integration can't tell which kind of connection it got, so it closes every new connection straight away and opens a second, which uses the remembered services. Seen through an ESPHome Bluetooth proxy. It costs a second or two per connection.
+- **Every connection is made twice.** Home Assistant remembers the lamp's services, but forgets them when it restarts and when the Bluetooth proxy reconnects. On a connection that has to look them up again, the lamp accepts a brightness and reads it back but doesn't carry it out, or the connection stalls. The integration can't tell which kind of connection it got, so it closes every new connection straight away and opens a second, which uses the remembered services. Seen through an ESPHome Bluetooth proxy. It costs a second or two per connection, and can be turned off per lamp (see the settings below).
 - **The lamp reports its own level.** After every connection the integration subscribes to the lamp's indications on the brightness characteristic, and those are the state. Nothing is polled.
 - **Safety net.** Every 5 minutes the brightness is read over the open connection, in case an indication never came. After a command the level is read back straight away, because the lamp sends no indication for a change it was told to make.
-- **Available means connected.** When the connection drops, the entities turn *unavailable* at once. The integration reconnects after 5, 10 and 30 seconds and then every minute, and sooner when the lamp is seen advertising again.
+- **Available means connected.** When the connection drops, the entities turn *unavailable* at once. The integration reconnects after 5, 10 and 30 seconds and then every minute, and sooner when the lamp is seen advertising again. The 5 seconds are the retry interval, a setting; the other waits follow it.
 
 What the open connection costs:
 
@@ -42,24 +42,38 @@ What the open connection costs:
 - **The Flos app cannot connect while Home Assistant is connected.** The lamp accepts one connection at a time. Disable the lamp's entry in Home Assistant for as long as you want to use the app.
 - **Two lamps on one Bluetooth proxy don't both work.** The lamp that connects while the proxy already holds another lamp accepts a brightness and reads it back, but doesn't carry it out. The lamp that was connected first keeps working. Seen with an ESPHome Bluetooth proxy. Use *Connect only when needed* (below) for the lamps on such a proxy.
 
+## Settings per lamp
+
+Each lamp has its own settings, under *Settings → Devices & services → Flos String Light → Configure* (the gear next to the lamp). Saving them reloads the lamp at once; Home Assistant doesn't have to restart. The defaults are what the integration did before a setting existed. Which values work best isn't known yet: the settings are there to find out.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Connection** | *Stay connected* | *Stay connected* (described above) or *Connect only when needed* (described below). |
+| **Poll interval** | 5 min | How often the brightness is read. 0 is never. |
+| **Power check interval** | 60 s | How often Home Assistant checks that the lamp still advertises, without a connection. 0 leaves that to Home Assistant itself. |
+| **Keep the connection open** | 0 s | How long the connection stays open after a change. 0 closes it right after the change. |
+| **Limit: visits** | 3 | The most visits to the lamp within the window; the next one waits. 0 is no limit. |
+| **Limit: window** | 30 s | The length of the window the limit counts in. |
+| **One lamp at a time** | on | Wait until no other lamp is connected. |
+| **Make every connection twice** | on | Open every connection, close it and open it again before use. |
+| **Connection attempts** | 2 | How many times in a row Home Assistant tries to connect before it gives up for this time. |
+| **Retry interval** | 5 s | The wait after a connection that failed. The next waits are 2, 6 and 12 times as long, and the last one repeats. |
+
+The poll interval, the power check interval, the open connection, the limit and *One lamp at a time* only apply to *Connect only when needed*. The last three settings apply to both ways of connecting.
+
 ## Connecting only when needed
-
-Each lamp has two settings, under *Settings → Devices & services → Flos String Light → Configure* (the gear next to the lamp):
-
-- **Connection:** *Stay connected* (the default, described above) or *Connect only when needed*.
-- **Poll interval**, in minutes: how often the brightness is read, over a short connection. Only used with *Connect only when needed*.
-- **Power check interval**, in seconds: how often Home Assistant checks that the lamp still advertises, without a connection. Only used with *Connect only when needed*.
 
 With *Connect only when needed*:
 
 - **A change connects, writes, reads the result back and disconnects.** That takes a few seconds.
+- **The connection can stay open after a change.** With *Keep the connection open* set to a number of seconds, the connection stays open that long after the last change. A change within that time is written at once, over the open connection, and starts the time again. Reads and the Refresh button use the open connection too, without making it stay longer. The connection closes sooner when another lamp needs its turn. Only a change keeps the connection open; a read never does.
 - **Only the last change counts.** A brightness that still waits, for its turn or for the lamp to connect, is replaced by the next one. Dragging a slider gives one or two changes, not ten.
-- **At most 3 visits per 30 seconds per lamp.** A lamp that is connected to too often in a short time stops advertising until its power is cut: seen after 6 changes in 20 seconds. So the integration visits a lamp at most 3 times per 30 seconds, counting changes, reads and the Refresh button. The next one waits, up to half a minute. Where the lamp's own limit lies isn't known yet.
-- **Lamps take turns.** No two lamps are connected at the same moment, so the problem with two lamps on one proxy doesn't occur. Set all lamps on the same proxy to *Connect only when needed*: a lamp that stays connected spoils it for the others.
+- **At most 3 visits per 30 seconds per lamp.** A lamp that is connected to too often in a short time stops advertising until its power is cut: seen after 6 changes in 20 seconds. So the integration visits a lamp at most 3 times per 30 seconds, counting changes, reads and the Refresh button. The next one waits, up to half a minute. Both numbers are settings. What goes over a connection that is kept open is no new visit and doesn't count. Where the lamp's own limit lies isn't known yet.
+- **Lamps take turns.** No two lamps are connected at the same moment, so the problem with two lamps on one proxy doesn't occur. Set all lamps on the same proxy to *Connect only when needed*: a lamp that stays connected spoils it for the others. A lamp that has a Bluetooth proxy to itself doesn't need to wait for the others: turn *One lamp at a time* off for it. Home Assistant picks the proxy for each connection, so that is only safe where no other lamp can end up on the same proxy.
 - **The state is read when Home Assistant starts, every poll interval and when the lamp advertises again.** With a poll interval of 0 it is never read in between; the state is then what Home Assistant last set. A change made with the Flos app or the dimmer on the cord shows up at the next read.
 - **A lamp that stops advertising has no power.** A lamp that isn't connected advertises, and Home Assistant hears that without connecting. Every power check interval (60 seconds by default) the integration looks at when the lamp was last heard. A lamp that wasn't heard since the previous check turns *unavailable*, and nothing connects to it until it advertises again; then its state is read at once. With an interval of 0 the integration waits for Home Assistant itself to miss the lamp, which takes a few minutes.
 - **Two diagnostic sensors** show which Bluetooth proxy hears the lamp best and how strong its signal is there, in dBm. They are refreshed at every power check, without a connection, and stay available for a lamp that advertises but can't be reached: a weak signal is often why. Home Assistant picks the proxy for each connection itself: the one with the best signal that has a free slot. A lamp can't be tied to one proxy; to move a lamp to another proxy, put that proxy closer to it.
-- **The Flos app can connect**, except during the seconds of a change or a read. While the app is connected the lamp doesn't advertise, so Home Assistant shows it as *unavailable*.
+- **The Flos app can connect**, except during the seconds of a change or a read, and for as long as the connection is kept open after a change. While the app is connected the lamp doesn't advertise, so Home Assistant shows it as *unavailable*.
 
 ## The lamp's name
 
@@ -80,7 +94,7 @@ Each lamp also has a text entity **Name**, under *Configuration* on the device p
 
 - Brightness and the name only.
 - While a lamp stays connected: one permanent connection slot per lamp, no Flos app, and only one lamp per Bluetooth proxy (see above).
-- With *Connect only when needed*: a few seconds per change, a fourth change within 30 seconds that waits, and a state that can lag behind until the next read.
+- With *Connect only when needed*: a few seconds per change unless the connection is still open from the change before, a fourth visit within 30 seconds that waits, and a state that can lag behind until the next read.
 
 ## Known issues
 
