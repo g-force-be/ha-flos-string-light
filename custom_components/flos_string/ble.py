@@ -53,6 +53,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from .const import (
     BRIGHTNESS_CHAR_UUID,
     CONNECT_ATTEMPTS,
+    DEFAULT_CONNECT_TWICE,
     DEVICE_NAME_CHAR_UUID,
     DOMAIN,
     NAME_CHAR_UUID,
@@ -93,6 +94,7 @@ class FlosStringBLEManager:
         on_demand: bool = False,
         poll_interval: float = REFRESH_INTERVAL,
         power_check_interval: float = 0,
+        connect_twice: bool = DEFAULT_CONNECT_TWICE,
     ) -> None:
         """Initialize the manager; async_start() opens the connection.
 
@@ -100,12 +102,15 @@ class FlosStringBLEManager:
         poll_interval: seconds between reads on demand; 0 is never.
         power_check_interval: seconds between checks, on demand, that the lamp
         still advertises; 0 leaves it to Home Assistant, which takes minutes.
+        connect_twice: open every connection, close it and open it again
+        before use.
         """
         self._hass = hass
         self.address = address
         self.on_demand = on_demand
         self._poll_interval = poll_interval
         self._power_check_interval = power_check_interval
+        self._connect_twice = connect_twice
         # On demand: True once the state is read; False after a connection that
         # failed and when the lamp stops advertising.
         self._reachable = False
@@ -283,7 +288,8 @@ class FlosStringBLEManager:
 
         _LOGGER.debug("Connecting to Flos String Light %s", self.address)
         self._disconnected.clear()
-        # Every connection is opened, closed and opened again before it is used.
+        # By default every connection is opened, closed and opened again before
+        # it is used; that is an option of the lamp.
         # Home Assistant remembers the lamp's services, but forgets them when it
         # restarts and when the Bluetooth proxy reconnects. A connection that has
         # to look them up is no good: the lamp accepts a brightness and reads it
@@ -291,9 +297,10 @@ class FlosStringBLEManager:
         # right after it uses the remembered services and works. Which kind a
         # connection is cannot be seen from here, so the first is never used.
         client = await self._establish(ble_device)
-        _LOGGER.debug("Reached %s: reconnecting before use", self.address)
-        await self._disconnect(client)
-        client = await self._establish(ble_device)
+        if self._connect_twice:
+            _LOGGER.debug("Reached %s: reconnecting before use", self.address)
+            await self._disconnect(client)
+            client = await self._establish(ble_device)
         self._client = client
         try:
             async with self._lock:

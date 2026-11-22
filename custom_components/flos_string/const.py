@@ -41,3 +41,8 @@ VISIT_WINDOW = 30
 # 0 leaves it to Home Assistant, which takes some minutes to miss a lamp.
 CONF_POWER_CHECK_INTERVAL = "power_check_interval"
 DEFAULT_POWER_CHECK_INTERVAL = 60
+
+# Open every connection, close it and open it again before use (see _connect()
+# in ble.py). Off saves the time of one connection.
+CONF_CONNECT_TWICE = "connect_twice"
+DEFAULT_CONNECT_TWICE = True

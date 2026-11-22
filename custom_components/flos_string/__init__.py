@@ -10,11 +10,13 @@ from homeassistant.core import HomeAssistant
 
 from .ble import FlosStringBLEManager
 from .const import (
+    CONF_CONNECT_TWICE,
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
+    DEFAULT_CONNECT_TWICE,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
 )
@@ -42,6 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
         power_check_interval=options.get(
             CONF_POWER_CHECK_INTERVAL, DEFAULT_POWER_CHECK_INTERVAL
         ),
+        connect_twice=options.get(CONF_CONNECT_TWICE, DEFAULT_CONNECT_TWICE),
     )
     entry.runtime_data = manager
     # Connects in the background: the setup must not wait for, or fail on, a lamp

@@ -21,6 +21,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -30,11 +31,13 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_CONNECT_TWICE,
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
+    DEFAULT_CONNECT_TWICE,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
     DOMAIN,
@@ -81,6 +84,9 @@ OPTIONS_SCHEMA = vol.Schema(
             ),
             vol.Coerce(int),
         ),
+        vol.Required(
+            CONF_CONNECT_TWICE, default=DEFAULT_CONNECT_TWICE
+        ): BooleanSelector(),
     }
 )
 
