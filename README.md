@@ -31,7 +31,8 @@ You need:
 - One light entity per lamp. Home Assistant's brightness (0–255) maps to the lamp's 0–100; 0 is off. *Turn on* without a brightness brings back the last one (100 % the first time).
 - The brightness is one byte on characteristic `335c1504-ad06-11e3-81e4-425861b86ab6` of service `0dcecf0c-ad06-11e3-81e4-425861b86ab6`.
 - **One connection per lamp, kept open.** The integration connects when Home Assistant starts and stays connected. Starting never waits for a lamp: the connection is made in the background.
-- **Every connection is made twice.** Home Assistant remembers the lamp's services, but forgets them when it restarts and when the Bluetooth proxy reconnects. On a connection that has to look them up again, the lamp accepts a brightness and reads it back but doesn't carry it out, or the connection stalls. The integration can't tell which kind of connection it got, so it closes every new connection straight away and opens a second, which uses the remembered services. Seen through an ESPHome Bluetooth proxy. It costs a second or two per connection, and can be turned off per lamp (see the settings below).
+- **Every connection is made twice, by default.** Home Assistant remembers the lamp's services, but forgets them when it restarts and when the Bluetooth proxy reconnects. On a connection that has to look them up again, the lamp accepts a brightness and reads it back but doesn't carry it out, or the connection stalls. So the integration closes every new connection straight away and opens a second, which uses the remembered services. Seen through an ESPHome Bluetooth proxy. It costs a second or two per connection.
+- **Or only when needed.** With *Second connection* set to *Only when needed* (see the settings below), only a connection that looked the services up is closed and opened again. Home Assistant hands out the very same services again for as long as it remembers them, and that is how the integration tells the two kinds apart. A connection it isn't sure of counts as one that looked them up. This is new and not the default yet.
 - **The lamp reports its own level.** After every connection the integration subscribes to the lamp's indications on the brightness characteristic, and those are the state. Nothing is polled.
 - **Safety net.** Every 5 minutes the brightness is read over the open connection, in case an indication never came. After a command the level is read back straight away, because the lamp sends no indication for a change it was told to make.
 - **Available means connected.** When the connection drops, the entities turn *unavailable* at once. The integration reconnects after 5, 10 and 30 seconds and then every minute, and sooner when the lamp is seen advertising again. The 5 seconds are the retry interval, a setting; the other waits follow it.
@@ -55,7 +56,7 @@ Each lamp has its own settings, under *Settings → Devices & services → Flos 
 | **Limit: visits** | 3 | The most visits to the lamp within the window; the next one waits. 0 is no limit. |
 | **Limit: window** | 30 s | The length of the window the limit counts in. |
 | **One lamp at a time** | on | Wait until no other lamp is connected. |
-| **Make every connection twice** | on | Open every connection, close it and open it again before use. |
+| **Second connection** | *Always* | When a connection is closed and opened again before use: *Always*, *Only when needed* (only when it had to look up the lamp's services) or *Never*. |
 | **Connection attempts** | 2 | How many times in a row Home Assistant tries to connect before it gives up for this time. |
 | **Retry interval** | 5 s | The wait after a connection that failed. The next waits are 2, 6 and 12 times as long, and the last one repeats. |
 
