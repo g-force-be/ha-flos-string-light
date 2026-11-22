@@ -36,6 +36,13 @@ Or, as an option per lamp, a connection only when it is needed ("on demand"):
   during a visit: a lamp that is connected is silent.
 - At the same moments the manager notes which Bluetooth proxy hears the lamp
   best and how well: the path Home Assistant takes for the next connection.
+- A lamp can have a power switch, another entity of Home Assistant (an option
+  of the lamp). Then a lamp that is silent has power all the same when the
+  switch is on. One that was not heard since a connection of ours closed is
+  stuck: it stays available, and the next change cuts its power and gives it
+  back before it connects. After a time that can be set, that happens on its
+  own. Once only, until the lamp was heard after a connection closed. A lamp
+  whose switch is off has no power and is unavailable at once.
 """
 
 from __future__ import annotations
@@ -62,6 +69,8 @@ from .const import (
     BRIGHTNESS_CHAR_UUID,
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_HOLD_TIME,
+    DEFAULT_OFF_TIME,
+    DEFAULT_RESET_AFTER,
     DEFAULT_RETRY_INTERVAL,
     DEFAULT_SECOND_CONNECTION,
     DEFAULT_TAKE_TURNS,
@@ -69,17 +78,22 @@ from .const import (
     DEFAULT_VISIT_WINDOW,
     DEVICE_NAME_CHAR_UUID,
     DOMAIN,
+    HEARD_POLL,
     KNOWN_SERVICES,
     NAME_CHAR_UUID,
     NAME_LENGTH,
     NAME_READBACK_ATTEMPTS,
     NAME_READBACK_INTERVAL,
+    POWER_BACK_TIMEOUT,
+    POWER_ON_RETRIES,
+    POWER_ON_TIMEOUT,
     REFRESH_INTERVAL,
     RETRY_STEPS,
     SECOND_ALWAYS,
     SECOND_WHEN_NEEDED,
     STABLE_CONNECTION,
 )
+from .power import PowerSwitch
 from .util import clean_name
 
 _LOGGER = logging.getLogger(__name__)
@@ -131,6 +145,9 @@ class FlosStringBLEManager:
         visit_limit: int = DEFAULT_VISIT_LIMIT,
         visit_window: float = DEFAULT_VISIT_WINDOW,
         take_turns: bool = DEFAULT_TAKE_TURNS,
+        power: PowerSwitch | None = None,
+        off_time: float = DEFAULT_OFF_TIME,
+        reset_after: float = DEFAULT_RESET_AFTER,
     ) -> None:
         """Initialize the manager; async_start() opens the connection.
 
@@ -148,6 +165,11 @@ class FlosStringBLEManager:
         visit_limit: on demand, the most visits per visit_window seconds; the
         next one waits. 0 is no limit.
         take_turns: on demand, wait until no other lamp is connected.
+        power: on demand, the switch that gives the lamp its power, if any: a
+        lamp that has power but went silent is reset with it.
+        off_time: seconds without power in such a reset.
+        reset_after: seconds of silence after which the lamp is reset on its
+        own; 0 resets it only when a change needs it.
         """
         self._hass = hass
         self.address = address
@@ -166,6 +188,30 @@ class FlosStringBLEManager:
         self._visit_limit = visit_limit
         self._visit_window = visit_window
         self._take_turns = take_turns
+        # On demand: the switch that gives the lamp its power, if one is chosen.
+        self._power = power if on_demand else None
+        self._off_time = off_time
+        # Without a switch nothing is reset, whatever was saved for it.
+        self._reset_after = reset_after if self._power is not None else 0
+        # What the switch last said, on or off, and when it last went on: a
+        # switch that is on at the start was on all along.
+        self._power_was: bool | None = None
+        self._power_on_at = float("-inf")
+        # When a connection of ours last closed: a lamp that is not heard
+        # after that is stuck. Not before one closed.
+        self._closed_at = float("-inf")
+        # True from a reset until the lamp was heard after a connection of
+        # ours closed: no second reset unless somebody asks for it with the
+        # button.
+        self._reset_done = False
+        # True while the manager itself switches the power off and on.
+        self._resetting = False
+        # True from the moment a reset cuts the power until the switch says
+        # on again; until then the task below keeps asking for it.
+        self._power_owed = False
+        self._giving_back: asyncio.Task[None] | None = None
+        self._power_said = asyncio.Event()  # the switch said something new
+        self._silence_logged = False
         # On demand: True once the state is read; False after a connection that
         # failed and when the lamp stops advertising.
         self._reachable = False
@@ -220,6 +266,16 @@ class FlosStringBLEManager:
         """
         return self._reachable if self.on_demand else self._ready
 
+    @property
+    def has_power_switch(self) -> bool:
+        """Return True when a switch is chosen that gives the lamp its power."""
+        return self._power is not None
+
+    @property
+    def _powered(self) -> bool | None:
+        """Return whether the switch gives the lamp power; None without a usable one."""
+        return None if self._power is None else self._power.is_on
+
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
         """Call listener on every change of brightness, name or availability."""
@@ -261,6 +317,9 @@ class FlosStringBLEManager:
                     self._hass, self._on_unavailable, self.address, connectable=True
                 )
             )
+        if self._power is not None:
+            self._power_was = self._power.is_on
+            entry.async_on_unload(self._power.async_listen(self._on_power_change))
         self._task = entry.async_create_background_task(
             self._hass,
             self._run_on_demand() if self.on_demand else self._run(),
@@ -284,6 +343,16 @@ class FlosStringBLEManager:
                     await self._stop_keeping()
         if (client := self._client) is not None:
             await self._disconnect(client)
+        if (giving := self._giving_back) is not None and not giving.done():
+            # A reset was under way: the lamp gets its power back first.
+            await asyncio.wait({giving}, timeout=POWER_BACK_TIMEOUT)
+            if not giving.done():
+                giving.cancel()
+                _LOGGER.error(
+                    "The power of Flos String Light %s is still off: switch it "
+                    "on yourself",
+                    self.address,
+                )
 
     async def _on_hass_stop(self, _event: Event) -> None:
         await self.async_stop()
@@ -470,6 +539,8 @@ class FlosStringBLEManager:
         """Close the connection, also when the lamp no longer answers."""
         with contextlib.suppress(*BLE_ERRORS):
             await client.disconnect()
+        # Also the first of two connections, which is not kept in self._client.
+        self._closed_at = time.monotonic()
         # In case the disconnect did not report itself.
         self._on_disconnected(client)
 
@@ -479,6 +550,7 @@ class FlosStringBLEManager:
         if client is not self._client:
             return  # an earlier connection, already handled
         self._client = None
+        self._closed_at = time.monotonic()
         self._disconnected.set()
         self._let_go.set()  # a connection that was kept open is gone
         if not self._ready:
@@ -507,9 +579,49 @@ class FlosStringBLEManager:
             now = time.monotonic()
             # Seconds until there may be something to do.
             waits = [self._power_check_interval] if self._power_check_interval else []
-            if not advertising:
+            powered = self._powered
+            self._note_recovery()
+            # Stuck, by the look of it, and not reset yet.
+            silent = not self._reset_done and self._silent()
+            if not silent:
+                self._silence_logged = False  # the next silence is a new one
+            if (
+                powered
+                and not advertising
+                and now - self._power_on_at < POWER_ON_TIMEOUT
+            ):
+                waits.append(HEARD_POLL)  # its power just came on: look often
+            if self._reset_after and silent:
+                if now >= self._closed_at + self._reset_after:
+                    await self._reset_on_its_own()
+                    continue
+                waits.append(self._closed_at + self._reset_after - now)
+            elif self._reset_after and powered and not self._reset_done:
+                # Look again once the lamp can be told silent, and has been
+                # for the time set.
+                due = self._closed_at + max(self._reset_after, ADVERTISE_AGAIN)
+                if due > now:
+                    waits.append(due - now + HEARD_POLL)
+            if silent:
+                # It has power, so it is available: the next change resets it,
+                # and somebody has to be able to ask for one. Nothing reads it
+                # meanwhile.
+                self._set_reachable(True)
+                if not self._silence_logged:
+                    self._silence_logged = True
+                    _LOGGER.info(
+                        "Flos String Light %s has power but stopped advertising "
+                        "after a connection: the next change resets it",
+                        self.address,
+                    )
+            elif not advertising:
                 # No power. Nothing connects until the lamp advertises again.
-                self._set_reachable(False, "the lamp does not advertise")
+                self._set_reachable(
+                    False,
+                    "its power switch is off"
+                    if powered is False
+                    else "the lamp does not advertise",
+                )
                 step, retry_at = 0, 0.0
             elif self._reachable and not self._poll_interval:
                 pass  # no polling: the state is what was last read or set
@@ -547,28 +659,325 @@ class FlosStringBLEManager:
         """
         if self._kept or self._visiting.locked():
             return True
-        heard = [
-            info.time
-            for connectable in (True, False)
-            if (
-                info := bluetooth.async_last_service_info(
-                    self._hass, self.address, connectable=connectable
-                )
-            )
-            is not None
-        ]
-        if not heard:
+        powered = self._powered
+        if powered is False:
+            return False  # its switch is off
+        heard = self._heard_at()
+        if (
+            powered
+            and self._power_on_at > self._last_contact
+            and (heard is None or heard <= self._power_on_at)
+        ):
+            return False  # not heard yet since its power came on
+        if powered and time.monotonic() - self._closed_at < ADVERTISE_AGAIN:
+            # Too soon after a connection to tell a lamp that is stuck from
+            # one that has no power, also with a short power check interval.
+            return True
+        if heard is None:
             # Home Assistant has not heard the lamp, or forgot it: no power. It
             # also forgets a lamp whose connection is kept open for long: after
             # a connection the lamp gets a moment to advertise again.
             return time.monotonic() - self._last_contact <= ADVERTISE_AGAIN
         if not self._power_check_interval:
             return True  # Home Assistant forgets a silent lamp after some minutes
-        silence = time.monotonic() - max(*heard, self._last_contact)
+        silence = time.monotonic() - max(heard, self._last_contact)
         _LOGGER.debug(
             "Flos String Light %s last advertised %.0f s ago", self.address, silence
         )
         return silence <= self._power_check_interval
+
+    def _heard_at(self) -> float | None:
+        """Return when Home Assistant last heard the lamp advertise, if it knows."""
+        return max(
+            (
+                info.time
+                for connectable in (True, False)
+                if (
+                    info := bluetooth.async_last_service_info(
+                        self._hass, self.address, connectable=connectable
+                    )
+                )
+                is not None
+            ),
+            default=None,
+        )
+
+    def _silent(self, margin: float | None = None) -> bool:
+        """Return True when the lamp has power but went silent after a connection.
+
+        That is a lamp that is stuck: all three times one was seen, it stopped
+        advertising right when a connection of ours closed. So the lamp is
+        silent when its switch is on, no connection is open, and Home Assistant
+        has not heard it since a connection of ours closed, margin seconds ago
+        or more (ADVERTISE_AGAIN unless given). A healthy lamp advertises
+        within a second.
+
+        A lamp that advertised after that and went quiet later is not silent in
+        this sense, whatever fails after that: the Flos app may hold it. Nor is
+        one whose power came on less than POWER_ON_TIMEOUT ago, or one that no
+        connection of ours closed on yet.
+        """
+        if not self._powered:
+            return False
+        if self._kept or self._client is not None:
+            return False
+        now = time.monotonic()
+        if now - self._power_on_at < POWER_ON_TIMEOUT:
+            return False
+        if now - self._closed_at < (ADVERTISE_AGAIN if margin is None else margin):
+            return False
+        if self._closed_at == float("-inf"):
+            return False
+        heard = self._heard_at()
+        return heard is None or heard <= self._closed_at
+
+    @callback
+    def _note_recovery(self) -> None:
+        """After a reset: the lamp is well once it was heard after a connection.
+
+        That is a connection of ours that closed after the power came on. Until
+        then the power is not cut again, except with the button: a lamp that
+        sticks again whenever a connection closes would be reset without end.
+        """
+        if not self._reset_done or self._closed_at <= self._power_on_at:
+            return
+        heard = self._heard_at()
+        if heard is not None and heard > self._closed_at:
+            self._reset_done = False
+
+    @callback
+    def _visit_ended(self, *, contact: bool) -> None:
+        """Note the end of a connection (contact) or of an attempt that failed."""
+        now = time.monotonic()
+        self._last_visit = now
+        if contact:
+            self._last_contact = now
+        if self._reset_after:
+            self._wake.set()  # the loop looks again when the lamp can be silent
+
+    # ---------------------------------------------------------------- power switch
+
+    @callback
+    def _on_power_change(self) -> None:
+        """The switch went on or off, or can no longer be used."""
+        assert self._power is not None
+        self._power_said.set()  # for a reset that waits to give the power back
+        if (is_on := self._power.is_on) is None:
+            # No longer usable: the lamp goes without. What it said last is
+            # kept, to tell what happened once it says something again.
+            self._wake.set()
+            return
+        was, self._power_was = self._power_was, is_on
+        if self._resetting:
+            return  # our own doing
+        if not is_on:
+            self._let_go.set()  # a connection that was kept open is gone
+            self._set_reachable(False, "its power switch is off")
+        elif was is False:
+            # Counts as a reset: no power is cut until the lamp is well again.
+            self._power_on_at = time.monotonic()
+            self._reset_done = True
+            _LOGGER.debug("The power of %s was switched on", self.address)
+        self._wake.set()
+
+    async def _power_cycle(self, why: str) -> bool:
+        """Cut the lamp's power and give it back; True once it advertises again.
+
+        Only with self._visiting held and no connection open.
+        """
+        assert self._power is not None
+        _LOGGER.info(
+            "Resetting Flos String Light %s (%s): its power goes off for %s s",
+            self.address,
+            why,
+            self._off_time,
+        )
+        # Before anything is tried: a switch that refuses is not asked again
+        # and again either.
+        self._reset_done = True
+        self._resetting = True
+        try:
+            try:
+                self._power_owed = True
+                await self._power.async_turn_off()
+                await asyncio.sleep(self._off_time)
+            finally:
+                # Also when this fails or is cancelled halfway: never leave the
+                # lamp without power. A task of its own, so it goes on then.
+                giving = self._start_giving_back()
+            await asyncio.wait({giving}, timeout=POWER_BACK_TIMEOUT)
+        finally:
+            self._resetting = False
+            self._wake.set()  # the loop looks at what the switch says now
+        if self._power_owed:
+            _LOGGER.error(
+                "The power of Flos String Light %s is still off: %s does not "
+                "switch on. Home Assistant keeps asking; switch it on yourself",
+                self.address,
+                self._power.entity_id,
+            )
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="switch_failed"
+            )
+        on_at = self._power_on_at
+        back = await self._wait_until_heard(on_at, POWER_ON_TIMEOUT)
+        if back:
+            _LOGGER.debug(
+                "%s advertises again, %.1f s after its power came on",
+                self.address,
+                time.monotonic() - on_at,
+            )
+        else:
+            _LOGGER.info(
+                "Flos String Light %s did not advertise within %s s after its "
+                "power came on",
+                self.address,
+                POWER_ON_TIMEOUT,
+            )
+        return back
+
+    @callback
+    def _start_giving_back(self) -> asyncio.Task[None]:
+        """Start switching the power back on, unless that is under way."""
+        assert self._entry is not None
+        if self._giving_back is None or self._giving_back.done():
+            self._giving_back = self._entry.async_create_background_task(
+                self._hass,
+                self._give_power_back(),
+                f"{DOMAIN} power {self.address}",
+            )
+        return self._giving_back
+
+    async def _give_power_back(self) -> None:
+        """Switch the lamp's power on, and keep at it until the switch says on.
+
+        A switch that fails, or that drops out in the seconds without power,
+        must not leave the lamp dark. So what counts is what the switch says,
+        not that the call went well: Home Assistant drops a call for an entity
+        it cannot use, without an error. The switch is asked again after a
+        while, and at once when one that dropped out is back.
+        """
+        assert self._power is not None
+        tries = 0
+        while True:
+            wait = POWER_ON_RETRIES[min(tries, len(POWER_ON_RETRIES) - 1)]
+            tries += 1
+            self._power_said.clear()
+            if self._power.is_on is not None:
+                try:
+                    await self._power.async_turn_on()
+                except Exception as err:  # noqa: BLE001 - whatever the switch raises
+                    _LOGGER.log(
+                        logging.WARNING if tries == 1 else logging.DEBUG,
+                        "Could not switch the power of Flos String Light %s back "
+                        "on with %s (%r): asking again",
+                        self.address,
+                        self._power.entity_id,
+                        err,
+                    )
+            asked = time.monotonic()
+            if await self._wait_until_on(wait):
+                break
+        self._power_owed = False
+        self._power_on_at = asked
+        if tries > 1:
+            _LOGGER.info(
+                "The power of Flos String Light %s is back on", self.address
+            )
+
+    async def _wait_until_on(self, timeout: float) -> bool:
+        """Wait until the switch says on; False when it does not in time.
+
+        Also False, at once, when a switch that could not be used says off:
+        it is back, and has to be asked.
+        """
+        assert self._power is not None
+        unusable = self._power.is_on is None
+        deadline = time.monotonic() + timeout
+        while not self._power.is_on:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(left):
+                    await self._power_said.wait()
+            self._power_said.clear()
+            if unusable and self._power.is_on is False:
+                return False
+        return True
+
+    async def _wait_until_heard(self, since: float, timeout: float) -> bool:
+        """Wait until the lamp was heard advertising after since; False when not.
+
+        Home Assistant tells nobody about an advertisement that says nothing
+        new, so this looks at when the lamp was last heard, every HEARD_POLL.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            heard = self._heard_at()
+            if heard is not None and heard > since:
+                return True
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            await asyncio.sleep(min(left, HEARD_POLL))
+
+    async def _stuck_after_failure(self) -> bool:
+        """After a connection that failed: True when the lamp is stuck.
+
+        It is when nothing was heard of it since a connection of ours closed.
+        A proxy does not listen while it connects, so a lamp that is well may
+        not have been heard yet: it first gets ADVERTISE_AGAIN seconds. One
+        connection that fails must not cut the power of a lamp that is well.
+        """
+        if self._reset_done or not self._silent(0):
+            return False
+        return not await self._wait_until_heard(self._closed_at, ADVERTISE_AGAIN)
+
+    async def _reset_for_change(self) -> None:
+        """Reset the silent lamp that a change needs; raise when it stays silent."""
+        if not await self._power_cycle("a change needs it and it is silent"):
+            self._set_reachable(False, "the lamp stayed silent after a reset")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="not_back"
+            )
+
+    async def _reset_on_its_own(self) -> None:
+        """Reset the lamp that was silent for the time set, and read it."""
+        try:
+            async with self._visiting:
+                if self._reset_done or not self._silent():
+                    return
+                back = await self._power_cycle(
+                    f"silent for {self._reset_after:g} s or more"
+                )
+            if not back:
+                self._set_reachable(False, "the lamp stayed silent after a reset")
+                return
+            await self._visit()
+        except HomeAssistantError:
+            # The switch or the visit logged why.
+            self._set_reachable(False, "the reset failed")
+        except Exception:  # noqa: BLE001 - a bug must not end the loop
+            _LOGGER.exception("Unexpected error resetting %s", self.address)
+            self._set_reachable(False, "unexpected error")
+
+    async def async_power_cycle(self) -> None:
+        """The button: cut the lamp's power, give it back and read its state."""
+        if not self._powered:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="power_off"
+            )
+        async with self._visiting:
+            if self._kept:
+                await self._stop_keeping()
+            back = await self._power_cycle("asked for")
+        if not back:
+            self._set_reachable(False, "the lamp stayed silent after a reset")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="not_back"
+            )
+        await self._visit()
 
     @callback
     def _update_signal(self, advertising: bool) -> None:
@@ -603,6 +1012,7 @@ class FlosStringBLEManager:
         action: Callable[[], Awaitable[None]] | None = None,
         *,
         keep: bool = False,
+        reset: bool = False,
     ) -> None:
         """Connect, read the state, do one thing and disconnect.
 
@@ -613,10 +1023,15 @@ class FlosStringBLEManager:
 
         keep: leave the connection open for the hold time, and keep the turn
         with it. The next visit within that time goes over that connection.
+        reset: this visit is worth a reset of a lamp that has a power switch
+        and is silent. A change is; a read is not.
         """
         async with self._visiting:
             if self._kept and await self._use_kept(action, keep):
                 return
+            self._note_recovery()
+            if reset and not self._reset_done and self._silent():
+                await self._reset_for_change()
             await self._wait_for_room()
             await self._take_turn()
             kept = False
@@ -626,10 +1041,23 @@ class FlosStringBLEManager:
                         translation_domain=DOMAIN, translation_key="not_connected"
                     )
                 try:
-                    await self._connect()
+                    try:
+                        await self._connect()
+                    except BLE_ERRORS:
+                        if not (reset and await self._stuck_after_failure()):
+                            raise
+                        # Stuck since a connection closed: the one before this
+                        # visit, too short ago to tell, or the first of the
+                        # two that this visit made.
+                        await self._reset_for_change()
+                        await self._connect()
                 except BLE_ERRORS as err:
-                    self._last_visit = time.monotonic()
-                    self._set_reachable(False, str(err))
+                    # A silent lamp that was not reset yet stays available:
+                    # the next change resets it.
+                    waits_for_reset = not self._reset_done and self._silent(0)
+                    self._visit_ended(contact=False)
+                    if not waits_for_reset:
+                        self._set_reachable(False, str(err))
                     raise HomeAssistantError(
                         translation_domain=DOMAIN,
                         translation_key="not_reachable",
@@ -644,7 +1072,7 @@ class FlosStringBLEManager:
                     if not kept:
                         if (client := self._client) is not None:
                             await self._disconnect(client)
-                        self._last_visit = self._last_contact = time.monotonic()
+                        self._visit_ended(contact=True)
             finally:
                 if not kept:
                     self._give_turn()
@@ -787,7 +1215,7 @@ class FlosStringBLEManager:
             if (client := self._client) is not None:
                 await self._disconnect(client)
         finally:
-            self._last_visit = self._last_contact = time.monotonic()
+            self._visit_ended(contact=True)
             self._give_turn()
 
     async def _wait_for_room(self) -> None:
@@ -840,6 +1268,9 @@ class FlosStringBLEManager:
         """Home Assistant no longer sees the lamp advertise: it has no power."""
         if self._kept:
             return  # connected, and so silent: it has power
+        self._note_recovery()
+        if not self._reset_done and self._silent():
+            return  # stuck, with power: the next change resets it
         self._set_reachable(False, "the lamp stopped advertising")
 
     async def async_refresh(self) -> None:
@@ -902,7 +1333,7 @@ class FlosStringBLEManager:
 
         try:
             while self._wanted is not None:
-                await self._visit(write, keep=True)
+                await self._visit(write, keep=True, reset=True)
         finally:
             # After an error: what waited is not written later.
             self._wanted = None

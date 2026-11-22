@@ -13,8 +13,11 @@ from .const import (
     CONF_CONNECT_ATTEMPTS,
     CONF_HOLD_TIME,
     CONF_CONNECTION,
+    CONF_OFF_TIME,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
+    CONF_POWER_SWITCH,
+    CONF_RESET_AFTER,
     CONF_RETRY_INTERVAL,
     CONF_TAKE_TURNS,
     CONF_VISIT_LIMIT,
@@ -23,13 +26,16 @@ from .const import (
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_HOLD_TIME,
+    DEFAULT_OFF_TIME,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
+    DEFAULT_RESET_AFTER,
     DEFAULT_RETRY_INTERVAL,
     DEFAULT_TAKE_TURNS,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
 )
+from .power import PowerSwitch
 from .util import second_connection
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,11 +51,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
     _LOGGER.debug("Setting up Flos String Light: %s", address)
 
     options = entry.options
+    on_demand = options.get(CONF_CONNECTION, CONNECTION_ALWAYS) == CONNECTION_ON_DEMAND
+    # A power switch is an option, and only of a lamp that connects on demand.
+    # Without one in the options the lamp works as it did before there was one.
+    switch = options.get(CONF_POWER_SWITCH) if on_demand else None
     manager = FlosStringBLEManager(
         hass,
         address,
-        on_demand=options.get(CONF_CONNECTION, CONNECTION_ALWAYS)
-        == CONNECTION_ON_DEMAND,
+        on_demand=on_demand,
         # Minutes in the options, seconds in the manager.
         poll_interval=options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL) * 60,
         power_check_interval=options.get(
@@ -64,6 +73,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
             CONF_CONNECT_ATTEMPTS, DEFAULT_CONNECT_ATTEMPTS
         ),
         retry_interval=options.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL),
+        power=PowerSwitch(hass, switch) if switch else None,
+        off_time=options.get(CONF_OFF_TIME, DEFAULT_OFF_TIME),
+        reset_after=options.get(CONF_RESET_AFTER, DEFAULT_RESET_AFTER),
     )
     entry.runtime_data = manager
     # Connects in the background: the setup must not wait for, or fail on, a lamp

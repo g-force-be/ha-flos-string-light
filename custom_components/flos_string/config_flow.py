@@ -22,6 +22,8 @@ from homeassistant.const import CONF_ADDRESS, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    EntitySelector,
+    EntitySelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -34,8 +36,11 @@ from .const import (
     CONF_CONNECT_ATTEMPTS,
     CONF_HOLD_TIME,
     CONF_CONNECTION,
+    CONF_OFF_TIME,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
+    CONF_POWER_SWITCH,
+    CONF_RESET_AFTER,
     CONF_RETRY_INTERVAL,
     CONF_SECOND_CONNECTION,
     CONF_TAKE_TURNS,
@@ -45,8 +50,10 @@ from .const import (
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_HOLD_TIME,
+    DEFAULT_OFF_TIME,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
+    DEFAULT_RESET_AFTER,
     DEFAULT_RETRY_INTERVAL,
     DEFAULT_SECOND_CONNECTION,
     DEFAULT_TAKE_TURNS,
@@ -115,6 +122,17 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Required(
             CONF_RETRY_INTERVAL, default=DEFAULT_RETRY_INTERVAL
         ): _whole_number(1, 600, "s"),
+        # Optional, without a default: left empty, nothing is saved for it and
+        # the lamp has no power switch.
+        vol.Optional(CONF_POWER_SWITCH): EntitySelector(
+            EntitySelectorConfig(domain=["switch", "input_boolean"])
+        ),
+        vol.Required(CONF_OFF_TIME, default=DEFAULT_OFF_TIME): _whole_number(
+            1, 60, "s"
+        ),
+        vol.Required(
+            CONF_RESET_AFTER, default=DEFAULT_RESET_AFTER
+        ): _whole_number(0, 3600, "s"),
     }
 )
 

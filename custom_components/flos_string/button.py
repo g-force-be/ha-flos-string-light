@@ -1,4 +1,4 @@
-"""Button platform for Flos String Light: reconnect to the lamp, or refresh it."""
+"""Button platform for Flos String Light: reconnect, refresh or power cycle."""
 
 from __future__ import annotations
 
@@ -19,23 +19,25 @@ async def async_setup_entry(
     entry: FlosStringConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the button that goes with the way the lamp is connected."""
+    """Set up the buttons that go with the way the lamp is connected."""
     manager = entry.runtime_data
-    button: FlosStringButton = (
+    buttons: list[FlosStringButton] = [
         FlosStringRefresh(manager, entry)
         if manager.on_demand
         else FlosStringReconnect(manager, entry)
-    )
-    # The other button belongs to the other way of connecting: take it away.
+    ]
+    if manager.has_power_switch:
+        buttons.append(FlosStringPowerCycle(manager, entry))
+    # A button that belongs to other settings of the lamp: take it away.
     registry = er.async_get(hass)
-    for other in (FlosStringReconnect, FlosStringRefresh):
-        if isinstance(button, other):
+    for other in (FlosStringReconnect, FlosStringRefresh, FlosStringPowerCycle):
+        if any(isinstance(button, other) for button in buttons):
             continue
         if entity_id := registry.async_get_entity_id(
             BUTTON_DOMAIN, DOMAIN, other(manager, entry).unique_id
         ):
             registry.async_remove(entity_id)
-    async_add_entities([button])
+    async_add_entities(buttons)
 
 
 class FlosStringButton(FlosStringEntity, ButtonEntity):
@@ -80,3 +82,22 @@ class FlosStringRefresh(FlosStringButton):
     async def async_press(self) -> None:
         """Read the lamp's state."""
         await self._manager.async_refresh()
+
+
+class FlosStringPowerCycle(FlosStringButton):
+    """Cut the lamp's power with its power switch, give it back and read the lamp.
+
+    Only for a lamp that has a power switch: for one that is stuck, or that
+    does not do what it is told.
+    """
+
+    _attr_translation_key = "power_cycle"
+
+    @property
+    def available(self) -> bool:
+        """Always: it is for a lamp that cannot be reached."""
+        return True
+
+    async def async_press(self) -> None:
+        """Switch the lamp's power off and on."""
+        await self._manager.async_power_cycle()

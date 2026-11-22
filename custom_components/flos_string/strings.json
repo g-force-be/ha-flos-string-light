@@ -39,7 +39,10 @@
           "take_turns": "One lamp at a time",
           "second_connection": "Second connection",
           "connect_attempts": "Connection attempts",
-          "retry_interval": "Retry interval"
+          "retry_interval": "Retry interval",
+          "power_switch": "Power switch",
+          "off_time": "Time without power",
+          "reset_after": "Reset after silence"
         },
         "data_description": {
           "connection": "Stay connected: the lamp reports every change at once. Connect only when needed: Home Assistant connects for a change or a read and disconnects again, one lamp at a time.",
@@ -51,7 +54,10 @@
           "take_turns": "Only when connecting when needed: wait until no other lamp is connected. Needed for lamps on the same Bluetooth proxy: a connection made while the proxy holds another lamp reaches a lamp that doesn't carry out what it is told. Turn it off only for a lamp that has a Bluetooth proxy of its own.",
           "second_connection": "A connection that has to look up the lamp's services, after a restart of Home Assistant or when the Bluetooth proxy reconnects, reaches a lamp that doesn't carry out what it is told, or stalls. Always: open every connection, close it and open it again before use. Only when needed: use a connection as it is when Home Assistant still remembered the lamp's services, and close and reopen only one that had to look them up; that saves a second or more on almost every connection. Never: use every connection as it is; the lamp then doesn't listen on the first connection after such a restart.",
           "connect_attempts": "How many times in a row Home Assistant tries to connect before it gives up for this time.",
-          "retry_interval": "Seconds until the next attempt after a connection that failed. Until it succeeds the lamp is unavailable. The attempts after that follow after 2, 6 and 12 times as long."
+          "retry_interval": "Seconds until the next attempt after a connection that failed. Until it succeeds the lamp is unavailable. The attempts after that follow after 2, 6 and 12 times as long.",
+          "power_switch": "Optional, and only when connecting when needed: the switch that gives the lamp its power, a relay in front of it for one. Leave it empty for a lamp without one. A lamp that has power but isn't heard any more after a connection closed is stuck, and only a power cut cures that. With a switch such a lamp stays available, and the next change switches its power off and on before it connects. The lamp also gets a Power cycle button. While the switch is off the lamp is unavailable.",
+          "off_time": "Only with a power switch: seconds the lamp goes without power when it is reset.",
+          "reset_after": "Only with a power switch: seconds a lamp may be stuck before it is reset on its own, without waiting for a change. A lamp counts as stuck after 10 seconds at the soonest. A lamp that is on goes dark for the time above. 0 never resets it on its own: only when a change needs the lamp, or with the Power cycle button."
         }
       }
     }
@@ -63,6 +69,9 @@
       },
       "refresh": {
         "name": "Refresh"
+      },
+      "power_cycle": {
+        "name": "Power cycle"
       }
     },
     "sensor": {
@@ -106,6 +115,15 @@
     },
     "name_too_long": {
       "message": "The name takes {length} bytes in UTF-8; the lamp stores at most {max}."
+    },
+    "power_off": {
+      "message": "The lamp's power switch is off or cannot be used."
+    },
+    "not_back": {
+      "message": "The lamp stayed silent after its power was switched off and on."
+    },
+    "switch_failed": {
+      "message": "The power switch did not switch the lamp back on. Home Assistant keeps asking; switch it on yourself."
     }
   }
 }

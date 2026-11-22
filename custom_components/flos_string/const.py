@@ -80,3 +80,34 @@ DEFAULT_CONNECT_ATTEMPTS = 2
 CONF_RETRY_INTERVAL = "retry_interval"
 DEFAULT_RETRY_INTERVAL = 5
 RETRY_STEPS = (1, 2, 6, 12)
+
+# On demand: the entity that gives the lamp its power, a relay for one. None is
+# chosen unless the options say so, and then nothing below applies. With it, a
+# lamp that has power but stopped advertising after a connection is reset: the
+# power is cut and given back.
+CONF_POWER_SWITCH = "power_switch"
+
+# Seconds without power in a reset.
+CONF_OFF_TIME = "off_time"
+DEFAULT_OFF_TIME = 5
+
+# Seconds a lamp may be silent before it is reset on its own. 0 is never on its
+# own: only when a change needs the lamp.
+CONF_RESET_AFTER = "reset_after"
+DEFAULT_RESET_AFTER = 0
+
+# Seconds a lamp gets to advertise after its power comes on. Not measured yet.
+POWER_ON_TIMEOUT = 30
+
+# Seconds between two looks at when the lamp was last heard, while waiting for
+# it. Home Assistant tells nobody about an advertisement that says nothing new.
+HEARD_POLL = 0.5
+
+# In a reset the switch is asked to give the power back, and gets so many
+# seconds to say it is on. Then it is asked again; the last time repeats until
+# it is on. The lamp must not be left without power.
+POWER_ON_RETRIES = (2, 5, 15, 60)
+
+# Seconds a reset waits for the power to be back. After that it fails; the
+# switch is still asked until it is on.
+POWER_BACK_TIMEOUT = 20
