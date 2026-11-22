@@ -32,30 +32,33 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_CONNECT_ATTEMPTS,
-    CONF_CONNECT_TWICE,
     CONF_HOLD_TIME,
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
     CONF_POWER_CHECK_INTERVAL,
     CONF_RETRY_INTERVAL,
+    CONF_SECOND_CONNECTION,
     CONF_TAKE_TURNS,
     CONF_VISIT_LIMIT,
     CONF_VISIT_WINDOW,
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_ATTEMPTS,
-    DEFAULT_CONNECT_TWICE,
     DEFAULT_HOLD_TIME,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
+    DEFAULT_SECOND_CONNECTION,
     DEFAULT_TAKE_TURNS,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
     DOMAIN,
+    SECOND_ALWAYS,
+    SECOND_NEVER,
+    SECOND_WHEN_NEEDED,
     SERVICE_UUID,
 )
-from .util import clean_name
+from .util import clean_name, second_connection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -98,8 +101,14 @@ OPTIONS_SCHEMA = vol.Schema(
         ): _whole_number(1, 3600, "s"),
         vol.Required(CONF_TAKE_TURNS, default=DEFAULT_TAKE_TURNS): BooleanSelector(),
         vol.Required(
-            CONF_CONNECT_TWICE, default=DEFAULT_CONNECT_TWICE
-        ): BooleanSelector(),
+            CONF_SECOND_CONNECTION, default=DEFAULT_SECOND_CONNECTION
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=[SECOND_ALWAYS, SECOND_WHEN_NEEDED, SECOND_NEVER],
+                translation_key=CONF_SECOND_CONNECTION,
+                mode=SelectSelectorMode.LIST,
+            )
+        ),
         vol.Required(
             CONF_CONNECT_ATTEMPTS, default=DEFAULT_CONNECT_ATTEMPTS
         ): _whole_number(1, 5),
@@ -243,9 +252,10 @@ class FlosStringOptionsFlow(OptionsFlowWithReload):
         """Choose between staying connected and connecting on demand."""
         if user_input is not None:
             return self.async_create_entry(data=user_input)
+        options = dict(self.config_entry.options)
+        # Options saved with 2026.47.9 hold an on/off setting instead.
+        options[CONF_SECOND_CONNECTION] = second_connection(options)
         return self.async_show_form(
             step_id="init",
-            data_schema=self.add_suggested_values_to_schema(
-                OPTIONS_SCHEMA, self.config_entry.options
-            ),
+            data_schema=self.add_suggested_values_to_schema(OPTIONS_SCHEMA, options),
         )

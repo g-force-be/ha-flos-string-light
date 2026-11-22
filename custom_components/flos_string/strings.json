@@ -37,7 +37,7 @@
           "visit_limit": "Limit: visits",
           "visit_window": "Limit: window",
           "take_turns": "One lamp at a time",
-          "connect_twice": "Make every connection twice",
+          "second_connection": "Second connection",
           "connect_attempts": "Connection attempts",
           "retry_interval": "Retry interval"
         },
@@ -49,7 +49,7 @@
           "visit_limit": "Only when connecting when needed: the most visits to the lamp, each a connection for a change or a read, within the window below. The next one waits. A lamp that is connected to too often in a short time stops advertising until its power is cut. 0 sets no limit.",
           "visit_window": "Only when connecting when needed: the length in seconds of the window that the limit counts in.",
           "take_turns": "Only when connecting when needed: wait until no other lamp is connected. Needed for lamps on the same Bluetooth proxy: a connection made while the proxy holds another lamp reaches a lamp that doesn't carry out what it is told. Turn it off only for a lamp that has a Bluetooth proxy of its own.",
-          "connect_twice": "Open every connection, close it and open it again before use. A connection that has to look up the lamp's services, after a restart of Home Assistant or of the Bluetooth proxy, reaches a lamp that doesn't carry out what it is told, or stalls; the second connection doesn't have to look them up. Off saves a second or more per connection.",
+          "second_connection": "A connection that has to look up the lamp's services, after a restart of Home Assistant or when the Bluetooth proxy reconnects, reaches a lamp that doesn't carry out what it is told, or stalls. Always: open every connection, close it and open it again before use. Only when needed: use a connection as it is when Home Assistant still remembered the lamp's services, and close and reopen only one that had to look them up; that saves a second or more on almost every connection. Never: use every connection as it is; the lamp then doesn't listen on the first connection after such a restart.",
           "connect_attempts": "How many times in a row Home Assistant tries to connect before it gives up for this time.",
           "retry_interval": "Seconds until the next attempt after a connection that failed. Until it succeeds the lamp is unavailable. The attempts after that follow after 2, 6 and 12 times as long."
         }
@@ -81,6 +81,13 @@
       "options": {
         "always": "Stay connected",
         "on_demand": "Connect only when needed"
+      }
+    },
+    "second_connection": {
+      "options": {
+        "always": "Always",
+        "when_needed": "Only when needed",
+        "never": "Never"
       }
     }
   },

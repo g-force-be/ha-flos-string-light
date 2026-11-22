@@ -61,20 +61,23 @@ from .const import (
     ADVERTISE_AGAIN,
     BRIGHTNESS_CHAR_UUID,
     DEFAULT_CONNECT_ATTEMPTS,
-    DEFAULT_CONNECT_TWICE,
     DEFAULT_HOLD_TIME,
     DEFAULT_RETRY_INTERVAL,
+    DEFAULT_SECOND_CONNECTION,
     DEFAULT_TAKE_TURNS,
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
     DEVICE_NAME_CHAR_UUID,
     DOMAIN,
+    KNOWN_SERVICES,
     NAME_CHAR_UUID,
     NAME_LENGTH,
     NAME_READBACK_ATTEMPTS,
     NAME_READBACK_INTERVAL,
     REFRESH_INTERVAL,
     RETRY_STEPS,
+    SECOND_ALWAYS,
+    SECOND_WHEN_NEEDED,
     STABLE_CONNECTION,
 )
 from .util import clean_name
@@ -122,7 +125,7 @@ class FlosStringBLEManager:
         poll_interval: float = REFRESH_INTERVAL,
         power_check_interval: float = 0,
         hold_time: float = DEFAULT_HOLD_TIME,
-        connect_twice: bool = DEFAULT_CONNECT_TWICE,
+        second_connection: str = DEFAULT_SECOND_CONNECTION,
         connect_attempts: int = DEFAULT_CONNECT_ATTEMPTS,
         retry_interval: float = DEFAULT_RETRY_INTERVAL,
         visit_limit: int = DEFAULT_VISIT_LIMIT,
@@ -137,8 +140,8 @@ class FlosStringBLEManager:
         still advertises; 0 leaves it to Home Assistant, which takes minutes.
         hold_time: on demand, seconds the connection stays open after a change;
         0 closes it at once.
-        connect_twice: open every connection, close it and open it again
-        before use.
+        second_connection: when a connection is closed and opened again before
+        use: always, only when it looked up the lamp's services, or never.
         connect_attempts: tries within one connection attempt.
         retry_interval: seconds until the next attempt after a connection that
         failed; the attempts after that follow after RETRY_STEPS times as long.
@@ -152,7 +155,10 @@ class FlosStringBLEManager:
         self._poll_interval = poll_interval
         self._power_check_interval = power_check_interval
         self._hold_time = hold_time
-        self._connect_twice = connect_twice
+        self._second_connection = second_connection
+        # The services of the connections so far, as Home Assistant handed them
+        # out: one for every adapter or proxy the lamp connected through.
+        self._known_services: list[object] = []
         self._connect_attempts = connect_attempts
         # The waits between attempts after a connection that failed; the last
         # one repeats.
@@ -349,19 +355,28 @@ class FlosStringBLEManager:
 
         _LOGGER.debug("Connecting to Flos String Light %s", self.address)
         self._disconnected.clear()
-        # By default every connection is opened, closed and opened again before
-        # it is used; that is an option of the lamp.
         # Home Assistant remembers the lamp's services, but forgets them when it
         # restarts and when the Bluetooth proxy reconnects. A connection that has
         # to look them up is no good: the lamp accepts a brightness and reads it
         # back without carrying it out, or the connection stalls. The one opened
-        # right after it uses the remembered services and works. Which kind a
-        # connection is cannot be seen from here, so the first is never used.
+        # right after it uses the remembered services and works. So a connection
+        # is closed and opened again before use: always, by default, or only
+        # when it looked the services up; that is an option of the lamp.
         client = await self._establish(ble_device)
-        if self._connect_twice:
+        if self._second_connection == SECOND_ALWAYS or (
+            self._second_connection == SECOND_WHEN_NEEDED and self._looked_up(client)
+        ):
             _LOGGER.debug("Reached %s: reconnecting before use", self.address)
             await self._disconnect(client)
             client = await self._establish(ble_device)
+            if self._second_connection == SECOND_WHEN_NEEDED and self._looked_up(
+                client
+            ):
+                # Through another proxy, for one: used as it is all the same.
+                _LOGGER.debug(
+                    "The second connection to %s looked up the services too",
+                    self.address,
+                )
         self._client = client
         try:
             async with self._lock:
@@ -389,6 +404,24 @@ class FlosStringBLEManager:
         )
         self.name = name
         self._set_brightness(data, "Read")
+
+    def _looked_up(self, client: BleakClient) -> bool:
+        """Return whether this connection had to look up the lamp's services.
+
+        Home Assistant hands out the very same services again for as long as it
+        remembers them, and new ones when it had to look them up. So services
+        that an earlier connection had too were remembered. Any others count as
+        looked up, and are known from now on.
+        """
+        try:
+            services = client.services
+        except BleakError:
+            return True  # none to show: not a connection to trust
+        if any(services is known for known in self._known_services):
+            return False
+        self._known_services.append(services)
+        del self._known_services[:-KNOWN_SERVICES]
+        return True
 
     async def _establish(self, ble_device: BLEDevice) -> BleakClient:
         """Open one connection through the Home Assistant Bluetooth stack."""

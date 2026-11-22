@@ -11,7 +11,6 @@ from homeassistant.core import HomeAssistant
 from .ble import FlosStringBLEManager
 from .const import (
     CONF_CONNECT_ATTEMPTS,
-    CONF_CONNECT_TWICE,
     CONF_HOLD_TIME,
     CONF_CONNECTION,
     CONF_POLL_INTERVAL,
@@ -23,7 +22,6 @@ from .const import (
     CONNECTION_ALWAYS,
     CONNECTION_ON_DEMAND,
     DEFAULT_CONNECT_ATTEMPTS,
-    DEFAULT_CONNECT_TWICE,
     DEFAULT_HOLD_TIME,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POWER_CHECK_INTERVAL,
@@ -32,6 +30,7 @@ from .const import (
     DEFAULT_VISIT_LIMIT,
     DEFAULT_VISIT_WINDOW,
 )
+from .util import second_connection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlosStringConfigEntry) -
         visit_limit=options.get(CONF_VISIT_LIMIT, DEFAULT_VISIT_LIMIT),
         visit_window=options.get(CONF_VISIT_WINDOW, DEFAULT_VISIT_WINDOW),
         take_turns=options.get(CONF_TAKE_TURNS, DEFAULT_TAKE_TURNS),
-        connect_twice=options.get(CONF_CONNECT_TWICE, DEFAULT_CONNECT_TWICE),
+        second_connection=second_connection(options),
         connect_attempts=options.get(
             CONF_CONNECT_ATTEMPTS, DEFAULT_CONNECT_ATTEMPTS
         ),

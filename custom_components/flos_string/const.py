@@ -57,10 +57,18 @@ DEFAULT_TAKE_TURNS = True
 CONF_POWER_CHECK_INTERVAL = "power_check_interval"
 DEFAULT_POWER_CHECK_INTERVAL = 60
 
-# Open every connection, close it and open it again before use (see _connect()
-# in ble.py). Off saves the time of one connection.
+# Whether a connection is closed and opened again before use (see _connect() in
+# ble.py): always, only when it had to look up the lamp's services, or never.
+CONF_SECOND_CONNECTION = "second_connection"
+SECOND_ALWAYS = "always"
+SECOND_WHEN_NEEDED = "when_needed"
+SECOND_NEVER = "never"
+DEFAULT_SECOND_CONNECTION = SECOND_ALWAYS
+# The on/off setting that 2026.47.9 stored instead: on is always, off is never.
 CONF_CONNECT_TWICE = "connect_twice"
-DEFAULT_CONNECT_TWICE = True
+# So many services, as Home Assistant handed them out, are remembered per lamp:
+# one for every adapter or proxy the lamp connected through.
+KNOWN_SERVICES = 4
 
 # Tries within one connection attempt, before the wait for the next attempt.
 CONF_CONNECT_ATTEMPTS = "connect_attempts"
